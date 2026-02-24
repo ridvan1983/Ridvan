@@ -2,6 +2,7 @@ import { useStore } from '@nanostores/react';
 import type { LinksFunction, MetaFunction } from '@remix-run/cloudflare';
 import { Links, Meta, Outlet, Scripts, ScrollRestoration } from '@remix-run/react';
 import tailwindReset from '@unocss/reset/tailwind-compat.css?url';
+import { AuthProvider } from '~/lib/auth/AuthContext';
 import { themeStore } from './lib/stores/theme';
 import { stripIndents } from './utils/stripIndent';
 import { createHead } from 'remix-island';
@@ -78,11 +79,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
   }, [theme]);
 
   return (
-    <>
-      {children}
-      <ScrollRestoration />
-      <Scripts />
-    </>
+    <AuthProvider>
+      <>
+        {children}
+        <ScrollRestoration />
+        <Scripts />
+      </>
+    </AuthProvider>
   );
 }
 
