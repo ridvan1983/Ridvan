@@ -35,9 +35,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
         await supabaseAdmin.from('subscriptions').upsert(
           {
             user_id: userId,
-            plan_id: planId,
+            plan: planId,
             stripe_subscription_id: typeof session.subscription === 'string' ? session.subscription : null,
-            credits: plan.monthlyCredits,
+            monthly_credits: plan.monthlyCredits,
             status: 'active',
           },
           { onConflict: 'user_id' },
@@ -51,21 +51,21 @@ export async function action({ context, request }: ActionFunctionArgs) {
       if (subscriptionId) {
         const { data: subscription } = await supabaseAdmin
           .from('subscriptions')
-          .select('user_id, plan_id, credits')
+          .select('user_id, plan, monthly_credits')
           .eq('stripe_subscription_id', subscriptionId)
-          .maybeSingle<{ user_id: string; plan_id: keyof typeof PLANS | null; credits: number | null }>();
+          .maybeSingle<{ user_id: string; plan: keyof typeof PLANS | null; monthly_credits: number | null }>();
 
         if (subscription?.user_id) {
-          const planKey = (subscription.plan_id ?? 'free') as keyof typeof PLANS;
+          const planKey = (subscription.plan ?? 'free') as keyof typeof PLANS;
           const plan = PLANS[planKey] ?? PLANS.free;
-          const currentRemaining = subscription.credits ?? 0;
+          const currentRemaining = subscription.monthly_credits ?? 0;
           const rolloverCredits = Math.floor(currentRemaining * (plan.rolloverPercent / 100));
           const rolledCarry = Math.min(rolloverCredits, plan.monthlyCredits);
           const nextCredits = rolledCarry + plan.monthlyCredits;
 
           await supabaseAdmin
             .from('subscriptions')
-            .update({ credits: nextCredits, status: 'active' })
+            .update({ monthly_credits: nextCredits, status: 'active' })
             .eq('stripe_subscription_id', subscriptionId);
         }
       }
@@ -76,7 +76,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       if (subscriptionId) {
         await supabaseAdmin
           .from('subscriptions')
-          .update({ status: 'cancelled', plan_id: 'free', credits: 0 })
+          .update({ status: 'cancelled', plan: 'free', monthly_credits: 0 })
           .eq('stripe_subscription_id', subscriptionId);
       }
     }

@@ -34,21 +34,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const { data: subscription, error } = await supabaseAdmin
     .from('subscriptions')
-    .select('plan_id, credits, status')
+    .select('plan, status, monthly_credits, daily_credits')
     .eq('user_id', user.id)
-    .maybeSingle<{ plan_id: string | null; credits: number | null; status: string | null }>();
+    .maybeSingle<{ plan: string | null; status: string | null; monthly_credits: number | null; daily_credits: number | null }>();
 
   if (error) {
     return Response.json({ error: '[RIDVAN-E403] Stripe error: failed to load credits' }, { status: 500 });
   }
 
   if (!subscription) {
-    return Response.json({ plan: 'free', credits: 5, status: 'active' });
+    return Response.json({ plan: 'free', credits: 0, dailyCredits: 5, status: 'active' });
   }
 
   return Response.json({
-    plan: subscription.plan_id ?? 'free',
-    credits: subscription.credits ?? 5,
+    plan: subscription.plan ?? 'free',
+    credits: subscription.monthly_credits ?? 0,
+    dailyCredits: subscription.daily_credits ?? 5,
     status: subscription.status ?? 'active',
   });
 }
