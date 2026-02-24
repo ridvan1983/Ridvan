@@ -13,6 +13,7 @@ import { workbenchStore } from '~/lib/stores/workbench';
 import { fileModificationsToHTML } from '~/utils/diff';
 import { cubicEasingFn } from '~/utils/easings';
 import { createScopedLogger, renderLogger } from '~/utils/logger';
+import OutOfCreditsModal from '~/components/credits/OutOfCreditsModal';
 import { BaseChat } from './BaseChat';
 
 const toastAnimation = cssTransition({
@@ -75,6 +76,7 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
   const buildRetryTimeoutRef = useRef<number | null>(null);
 
   const [chatStarted, setChatStarted] = useState(initialMessages.length > 0);
+  const [showOutOfCredits, setShowOutOfCredits] = useState(false);
 
   const { showChat } = useStore(chatStore);
 
@@ -103,6 +105,17 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
       : undefined,
     onError: (error) => {
       logger.error('Request failed\n\n', error);
+      const status =
+        (error as any)?.status ??
+        (error as any)?.statusCode ??
+        (error as any)?.cause?.status ??
+        (error as any)?.cause?.statusCode;
+
+      if (status === 403) {
+        setShowOutOfCredits(true);
+        return;
+      }
+
       toast.error('There was an error processing your request');
     },
     onFinish: () => {
@@ -237,6 +250,7 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
     await workbenchStore.saveAllFiles();
 
     const fileModifications = workbenchStore.getFileModifcations();
+    setShowOutOfCredits(false);
 
     fixAttemptCount.current = 0;
 
@@ -280,36 +294,39 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
   const [messageRef, scrollRef] = useSnapScroll();
 
   return (
-    <BaseChat
-      ref={animationScope}
-      textareaRef={textareaRef}
-      input={input}
-      showChat={showChat}
-      chatStarted={chatStarted}
-      isStreaming={isLoading}
-      enhancingPrompt={enhancingPrompt}
-      promptEnhanced={promptEnhanced}
-      sendMessage={sendMessage}
-      messageRef={messageRef}
-      scrollRef={scrollRef}
-      handleInputChange={handleInputChange}
-      handleStop={abort}
-      messages={messages.map((message, i) => {
-        if (message.role === 'user') {
-          return message;
-        }
+    <>
+      <BaseChat
+        ref={animationScope}
+        textareaRef={textareaRef}
+        input={input}
+        showChat={showChat}
+        chatStarted={chatStarted}
+        isStreaming={isLoading}
+        enhancingPrompt={enhancingPrompt}
+        promptEnhanced={promptEnhanced}
+        sendMessage={sendMessage}
+        messageRef={messageRef}
+        scrollRef={scrollRef}
+        handleInputChange={handleInputChange}
+        handleStop={abort}
+        messages={messages.map((message, i) => {
+          if (message.role === 'user') {
+            return message;
+          }
 
-        return {
-          ...message,
-          content: parsedMessages[i] || '',
-        };
-      })}
-      enhancePrompt={() => {
-        enhancePrompt(input, (input) => {
-          setInput(input);
-          scrollTextArea();
-        });
-      }}
-    />
+          return {
+            ...message,
+            content: parsedMessages[i] || '',
+          };
+        })}
+        enhancePrompt={() => {
+          enhancePrompt(input, (input) => {
+            setInput(input);
+            scrollTextArea();
+          });
+        }}
+      />
+      <OutOfCreditsModal isOpen={showOutOfCredits} onClose={() => setShowOutOfCredits(false)} />
+    </>
   );
 });
