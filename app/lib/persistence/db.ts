@@ -48,20 +48,83 @@ export async function setMessages(
   urlId?: string,
   description?: string,
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction('chats', 'readwrite');
-    const store = transaction.objectStore('chats');
-
-    const request = store.put({
+  return new Promise(async (resolve, reject) => {
+    const payload = {
       id,
       messages,
       urlId,
       description,
       timestamp: new Date().toISOString(),
-    });
+    };
 
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
+    const putRecord = () =>
+      new Promise<void>((resolvePut, rejectPut) => {
+        const transaction = db.transaction('chats', 'readwrite');
+        const store = transaction.objectStore('chats');
+        const request = store.put(payload);
+
+        request.onsuccess = () => resolvePut();
+        request.onerror = () => rejectPut(request.error);
+      });
+
+    const getByUrlId = (value: string) =>
+      new Promise<ChatHistoryItem | undefined>((resolveGet, rejectGet) => {
+        const transaction = db.transaction('chats', 'readonly');
+        const store = transaction.objectStore('chats');
+        const request = store.index('urlId').get(value);
+
+        request.onsuccess = () => resolveGet(request.result as ChatHistoryItem | undefined);
+        request.onerror = () => rejectGet(request.error);
+      });
+
+    const deleteByPrimaryId = (targetId: string) =>
+      new Promise<void>((resolveDelete, rejectDelete) => {
+        const transaction = db.transaction('chats', 'readwrite');
+        const store = transaction.objectStore('chats');
+        const request = store.delete(targetId);
+
+        request.onsuccess = () => resolveDelete();
+        request.onerror = () => rejectDelete(request.error);
+      });
+
+    try {
+      await putRecord();
+      resolve();
+    } catch (error) {
+      const isConstraintError = (error as DOMException | null)?.name === 'ConstraintError';
+
+      if (!isConstraintError) {
+        reject(error);
+        return;
+      }
+
+      if (!urlId) {
+        logger.warn(`ConstraintError while saving chat ${id} without urlId, suppressing error`);
+        resolve();
+        return;
+      }
+
+      try {
+        const conflictingRecord = await getByUrlId(urlId);
+
+        if (conflictingRecord && conflictingRecord.id !== id) {
+          await deleteByPrimaryId(conflictingRecord.id);
+        }
+
+        await putRecord();
+        resolve();
+      } catch (retryError) {
+        const isRetryConstraintError = (retryError as DOMException | null)?.name === 'ConstraintError';
+
+        if (isRetryConstraintError) {
+          logger.warn(`ConstraintError while saving chat ${id} for urlId ${urlId}, suppressing error`);
+          resolve();
+          return;
+        }
+
+        reject(retryError);
+      }
+    }
   });
 }
 
