@@ -136,10 +136,23 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
       return;
     }
 
-    await Promise.all([
-      animate('#examples', { opacity: 0, display: 'none' }, { duration: 0.1 }),
-      animate('#intro', { opacity: 0, flex: 1 }, { duration: 0.2, ease: cubicEasingFn }),
-    ]);
+    try {
+      const animations = [];
+
+      if (animationScope.current?.querySelector('#examples')) {
+        animations.push(animate('#examples', { opacity: 0, display: 'none' }, { duration: 0.1 }));
+      }
+
+      if (animationScope.current?.querySelector('#intro')) {
+        animations.push(animate('#intro', { opacity: 0, flex: 1 }, { duration: 0.2, ease: cubicEasingFn }));
+      }
+
+      if (animations.length > 0) {
+        await Promise.all(animations);
+      }
+    } catch (error) {
+      console.warn('[RIDVAN] Animation skipped:', error);
+    }
 
     chatStore.setKey('started', true);
 

@@ -13,57 +13,57 @@ export function usePromptEnhancer() {
   };
 
   const enhancePrompt = async (input: string, setInput: (value: string) => void) => {
+    const originalInput = input;
+
     setEnhancingPrompt(true);
     setPromptEnhanced(false);
 
-    const response = await fetch('/api/enhancer', {
-      method: 'POST',
-      body: JSON.stringify({
-        message: input,
-      }),
-    });
+    try {
+      const response = await fetch('/api/enhancer', {
+        method: 'POST',
+        body: JSON.stringify({
+          message: input,
+        }),
+      });
 
-    const reader = response.body?.getReader();
-
-    const originalInput = input;
-
-    if (reader) {
-      const decoder = new TextDecoder();
-
-      let _input = '';
-      let _error;
-
-      try {
-        setInput('');
-
-        while (true) {
-          const { value, done } = await reader.read();
-
-          if (done) {
-            break;
-          }
-
-          _input += decoder.decode(value);
-
-          logger.trace('Set input', _input);
-
-          setInput(_input);
-        }
-      } catch (error) {
-        _error = error;
-        setInput(originalInput);
-      } finally {
-        if (_error) {
-          logger.error(_error);
-        }
-
-        setEnhancingPrompt(false);
-        setPromptEnhanced(true);
-
-        setTimeout(() => {
-          setInput(_input);
-        });
+      if (!response.ok) {
+        throw new Error(`Enhancer request failed with status ${response.status}`);
       }
+
+      const reader = response.body?.getReader();
+
+      if (!reader) {
+        throw new Error('Enhancer response has no readable stream');
+      }
+
+      const decoder = new TextDecoder();
+      let enhancedInput = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+
+        if (done) {
+          break;
+        }
+
+        enhancedInput += decoder.decode(value);
+        logger.trace('Set input', enhancedInput);
+        setInput(enhancedInput);
+      }
+
+      if (enhancedInput.trim().length === 0) {
+        setInput(originalInput);
+        setPromptEnhanced(false);
+        return;
+      }
+
+      setPromptEnhanced(true);
+    } catch (error) {
+      logger.error(error);
+      setInput(originalInput);
+      setPromptEnhanced(false);
+    } finally {
+      setEnhancingPrompt(false);
     }
   };
 

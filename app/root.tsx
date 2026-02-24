@@ -1,11 +1,12 @@
 import { useStore } from '@nanostores/react';
-import type { LinksFunction } from '@remix-run/cloudflare';
+import type { LinksFunction, MetaFunction } from '@remix-run/cloudflare';
 import { Links, Meta, Outlet, Scripts, ScrollRestoration } from '@remix-run/react';
 import tailwindReset from '@unocss/reset/tailwind-compat.css?url';
 import { themeStore } from './lib/stores/theme';
 import { stripIndents } from './utils/stripIndent';
 import { createHead } from 'remix-island';
 import { useEffect } from 'react';
+import { brand } from '~/config/brand';
 
 import reactToastifyStyles from 'react-toastify/dist/ReactToastify.css?url';
 import globalStyles from './styles/index.scss?url';
@@ -38,6 +39,11 @@ export const links: LinksFunction = () => [
   },
 ];
 
+export const meta: MetaFunction = () => [
+  { title: brand.meta.title },
+  { name: 'description', content: brand.meta.ogDescription },
+];
+
 const inlineThemeCode = stripIndents`
   setTutorialKitTheme();
 
@@ -57,6 +63,8 @@ export const Head = createHead(() => (
     <meta charSet="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <Meta />
+    <title>{brand.meta.title}</title>
+    <meta name="description" content={brand.meta.ogDescription} />
     <Links />
     <script dangerouslySetInnerHTML={{ __html: inlineThemeCode }} />
   </>

@@ -19,9 +19,15 @@ async function enhancerAction({ context, request }: ActionFunctionArgs) {
         {
           role: 'user',
           content: stripIndents`
-          I want you to improve the user prompt that is wrapped in \`<original_prompt>\` tags.
+          Improve the user prompt wrapped in \`<original_prompt>\` into a detailed, technical app specification.
+          Keep the same language as the user's prompt.
+          Expand vague requirements into specific implementation details:
+          - features and behaviors
+          - UI/UX expectations
+          - data/state requirements
+          - tech constraints and acceptance criteria
 
-          IMPORTANT: Only respond with the improved prompt and nothing else!
+          IMPORTANT: Respond with only the improved prompt text. No preface, no explanation.
 
           <original_prompt>
             ${message}
@@ -40,6 +46,7 @@ async function enhancerAction({ context, request }: ActionFunctionArgs) {
           .filter((line) => line !== '')
           .map(parseStreamPart)
           .map((part) => part.value)
+          .filter((value): value is string => typeof value === 'string')
           .join('');
 
         controller.enqueue(encoder.encode(processedChunk));

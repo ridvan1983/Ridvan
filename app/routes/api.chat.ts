@@ -9,6 +9,17 @@ export async function action(args: ActionFunctionArgs) {
 }
 
 async function chatAction({ context, request }: ActionFunctionArgs) {
+  console.log('[RIDVAN DEBUG] ENV CHECK:', {
+    hasApiKey: !!process.env.ANTHROPIC_API_KEY,
+    keyPrefix: process.env.ANTHROPIC_API_KEY?.substring(0, 15),
+    envSource: 'process.env',
+  });
+  console.log('[RIDVAN DEBUG] CF ENV CHECK:', {
+    hasApiKey: !!context.cloudflare?.env?.ANTHROPIC_API_KEY,
+    keyPrefix: context.cloudflare?.env?.ANTHROPIC_API_KEY?.substring(0, 15),
+    envSource: 'context.cloudflare.env',
+  });
+
   const { messages } = await request.json<{ messages: Messages }>();
 
   const stream = new SwitchableStream();
