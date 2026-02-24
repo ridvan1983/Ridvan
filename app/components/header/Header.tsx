@@ -5,6 +5,7 @@ import { classNames } from '~/utils/classNames';
 import { HeaderActionButtons } from './HeaderActionButtons.client';
 import { ChatDescription } from '~/lib/persistence/ChatDescription.client';
 import { brand } from '~/config/brand';
+import CreditDisplay from '~/components/credits/CreditDisplay';
 
 export function Header() {
   const chat = useStore(chatStore);
@@ -31,8 +32,11 @@ export function Header() {
       {chat.started && (
         <ClientOnly>
           {() => (
-            <div className="mr-1">
-              <HeaderActionButtons />
+            <div className="mr-1 flex items-center gap-2">
+              <CreditDisplay />
+              <div>
+                <HeaderActionButtons />
+              </div>
             </div>
           )}
         </ClientOnly>
