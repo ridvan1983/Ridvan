@@ -1,8 +1,11 @@
 import { type ActionFunctionArgs } from '@remix-run/cloudflare';
+import { checkCredits } from '~/lib/credits/check';
+import { deductCredit } from '~/lib/credits/deduct';
 import { MAX_RESPONSE_SEGMENTS, MAX_TOKENS } from '~/lib/.server/llm/constants';
 import { CONTINUE_PROMPT } from '~/lib/.server/llm/prompts';
 import { streamText, type Messages, type StreamingOptions } from '~/lib/.server/llm/stream-text';
 import SwitchableStream from '~/lib/.server/llm/switchable-stream';
+import { supabaseAdmin } from '~/lib/supabase/server';
 
 export async function action(args: ActionFunctionArgs) {
   return chatAction(args);
@@ -19,6 +22,47 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
     keyPrefix: context.cloudflare?.env?.ANTHROPIC_API_KEY?.substring(0, 15),
     envSource: 'context.cloudflare.env',
   });
+
+  const authHeader = request.headers.get('authorization');
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+
+  if (!token) {
+    return Response.json(
+      { error: '[RIDVAN-E013] Unauthorized: missing Bearer token' },
+      {
+        status: 401,
+      },
+    );
+  }
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabaseAdmin.auth.getUser(token);
+
+  if (userError || !user) {
+    return Response.json(
+      { error: `[RIDVAN-E013] Unauthorized: ${userError?.message ?? 'invalid token'}` },
+      {
+        status: 401,
+      },
+    );
+  }
+
+  const creditState = await checkCredits(user.id);
+
+  if (!creditState.allowed) {
+    return Response.json(
+      {
+        error: '[RIDVAN-E011] No credits remaining',
+        remaining: creditState.remaining,
+        plan: creditState.plan,
+      },
+      {
+        status: 403,
+      },
+    );
+  }
 
   const { messages } = await request.json<{ messages: Messages }>();
 
@@ -50,6 +94,19 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
     };
 
     const result = await streamText(messages, context.cloudflare.env, options);
+
+    const deduction = await deductCredit(user.id, 'AI generation');
+
+    if (!deduction.success) {
+      return Response.json(
+        {
+          error: deduction.error ?? '[RIDVAN-E012] Failed to deduct credit',
+        },
+        {
+          status: 500,
+        },
+      );
+    }
 
     stream.switchSource(result.toAIStream());
 
