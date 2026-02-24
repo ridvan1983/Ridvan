@@ -71,8 +71,8 @@ export default function CreditDisplay() {
   }
 
   return (
-    <span className="text-xs text-bolt-elements-textSecondary whitespace-nowrap" title="Remaining build credits">
-      {loading ? '...' : `⚡ ${credits ?? 0} builds left`}
+    <span className="text-xs text-bolt-elements-textSecondary whitespace-nowrap" title="Remaining credits">
+      {loading ? '...' : `⚡ ${credits ?? 0} credits`}
     </span>
   );
 }

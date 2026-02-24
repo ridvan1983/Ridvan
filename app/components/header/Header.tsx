@@ -29,14 +29,14 @@ export function Header() {
       <span className="flex-1 px-4 truncate text-center text-bolt-elements-textPrimary">
         <ClientOnly>{() => <ChatDescription />}</ClientOnly>
       </span>
+      <div className="mr-2">
+        <CreditDisplay />
+      </div>
       {chat.started && (
         <ClientOnly>
           {() => (
-            <div className="mr-1 flex items-center gap-2">
-              <CreditDisplay />
-              <div>
-                <HeaderActionButtons />
-              </div>
+            <div className="mr-1">
+              <HeaderActionButtons />
             </div>
           )}
         </ClientOnly>
