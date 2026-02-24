@@ -38,9 +38,16 @@ export class ActionRunner {
   #currentExecutionPromise: Promise<void> = Promise.resolve();
 
   actions: ActionsMap = map({});
+  lastBuildError: string | null = null;
 
   constructor(webcontainerPromise: Promise<WebContainer>) {
     this.#webcontainer = webcontainerPromise;
+  }
+
+  getAndClearBuildError() {
+    const error = this.lastBuildError;
+    this.lastBuildError = null;
+    return error;
   }
 
   addAction(data: ActionCallbackData) {
@@ -131,6 +138,7 @@ export class ActionRunner {
     const process = await webcontainer.spawn('jsh', ['-c', action.content], {
       env: { npm_config_yes: true },
     });
+    let processOutput = '';
 
     action.abortSignal.addEventListener('abort', () => {
       process.kill();
@@ -139,13 +147,29 @@ export class ActionRunner {
     process.output.pipeTo(
       new WritableStream({
         write(data) {
-          console.log(data);
+          const text = typeof data === 'string' ? data : String(data);
+          processOutput += text;
+          console.log(text);
         },
       }),
     );
 
     const exitCode = await process.exit;
 
+    if (action.abortSignal.aborted) {
+      this.lastBuildError = null;
+      logger.debug(`Process aborted with code ${exitCode}`);
+      return;
+    }
+
+    if (exitCode !== 0) {
+      const output = processOutput.trim();
+      this.lastBuildError = (output.length > 0 ? output : `Command exited with code ${exitCode}`).slice(-1500);
+      logger.error(`[RIDVAN-E301] Build failed (exit code ${exitCode})\n\n${this.lastBuildError}`);
+      throw new Error('[RIDVAN-E301] Build failed');
+    }
+
+    this.lastBuildError = null;
     logger.debug(`Process terminated with code ${exitCode}`);
   }
 

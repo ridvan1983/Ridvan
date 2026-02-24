@@ -4,6 +4,7 @@ import { useChat } from 'ai/react';
 import { useAnimate } from 'framer-motion';
 import { memo, useEffect, useRef, useState } from 'react';
 import { cssTransition, toast, ToastContainer } from 'react-toastify';
+import { MAX_FIX_ATTEMPTS } from '~/config/constants';
 import { useAuth } from '~/lib/auth/AuthContext';
 import { useMessageParser, usePromptEnhancer, useShortcuts, useSnapScroll } from '~/lib/hooks';
 import { useChatHistory } from '~/lib/persistence';
@@ -70,12 +71,28 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
   const { session } = useAuth();
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fixAttemptCount = useRef(0);
+  const buildRetryTimeoutRef = useRef<number | null>(null);
 
   const [chatStarted, setChatStarted] = useState(initialMessages.length > 0);
 
   const { showChat } = useStore(chatStore);
 
   const [animationScope, animate] = useAnimate();
+
+  const getAndClearBuildError = () => {
+    const artifacts = workbenchStore.artifacts.get();
+
+    for (const artifactId of [...workbenchStore.artifactIdList].reverse()) {
+      const buildError = artifacts[artifactId]?.runner.getAndClearBuildError();
+
+      if (buildError) {
+        return buildError;
+      }
+    }
+
+    return null;
+  };
 
   const { messages, isLoading, input, handleInputChange, setInput, stop, append } = useChat({
     api: '/api/chat',
@@ -90,6 +107,35 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
     },
     onFinish: () => {
       logger.debug('Finished streaming');
+
+      if (buildRetryTimeoutRef.current !== null) {
+        window.clearTimeout(buildRetryTimeoutRef.current);
+      }
+
+      buildRetryTimeoutRef.current = window.setTimeout(async () => {
+        const buildError = getAndClearBuildError();
+
+        if (!buildError) {
+          if (fixAttemptCount.current > 0) {
+            fixAttemptCount.current = 0;
+          }
+
+          return;
+        }
+
+        if (fixAttemptCount.current < MAX_FIX_ATTEMPTS) {
+          fixAttemptCount.current++;
+
+          await append({
+            role: 'user',
+            content: `The build failed with the following error:\n\`\`\`\n${buildError}\n\`\`\`\nPlease fix the code to resolve this error. Only fix the broken file(s), do not regenerate the entire project.`,
+          });
+          return;
+        }
+
+        toast.error(`Build failed after ${MAX_FIX_ATTEMPTS} attempts. Check the error in the terminal.`);
+        fixAttemptCount.current = 0;
+      }, 3000);
     },
     initialMessages,
   });
@@ -110,6 +156,14 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
       storeMessageHistory(messages).catch((error) => toast.error(error.message));
     }
   }, [messages, isLoading, parseMessages]);
+
+  useEffect(() => {
+    return () => {
+      if (buildRetryTimeoutRef.current !== null) {
+        window.clearTimeout(buildRetryTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const scrollTextArea = () => {
     const textarea = textareaRef.current;
@@ -183,6 +237,13 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
     await workbenchStore.saveAllFiles();
 
     const fileModifications = workbenchStore.getFileModifcations();
+
+    fixAttemptCount.current = 0;
+
+    if (buildRetryTimeoutRef.current !== null) {
+      window.clearTimeout(buildRetryTimeoutRef.current);
+      buildRetryTimeoutRef.current = null;
+    }
 
     chatStore.setKey('aborted', false);
 
