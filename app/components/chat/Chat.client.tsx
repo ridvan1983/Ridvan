@@ -2,6 +2,7 @@ import { useStore } from '@nanostores/react';
 import type { Message } from 'ai';
 import { useChat } from 'ai/react';
 import { useAnimate } from 'framer-motion';
+import { useSearchParams } from '@remix-run/react';
 import { memo, useEffect, useRef, useState } from 'react';
 import { cssTransition, toast, ToastContainer } from 'react-toastify';
 import { MAX_FIX_ATTEMPTS } from '~/config/constants';
@@ -70,10 +71,12 @@ interface ChatProps {
 export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProps) => {
   useShortcuts();
   const { session } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fixAttemptCount = useRef(0);
   const buildRetryTimeoutRef = useRef<number | null>(null);
+  const autoSubmittedRef = useRef(false);
 
   const [chatStarted, setChatStarted] = useState(initialMessages.length > 0);
   const [showOutOfCredits, setShowOutOfCredits] = useState(false);
@@ -177,6 +180,26 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
       }
     };
   }, []);
+
+  useEffect(() => {
+    const promptParam = searchParams.get('prompt');
+
+    if (!promptParam?.trim() || autoSubmittedRef.current || !session?.access_token) {
+      return;
+    }
+
+    autoSubmittedRef.current = true;
+
+    const timeoutId = window.setTimeout(async () => {
+      runAnimation();
+      await append({ role: 'user', content: promptParam });
+      setSearchParams({}, { replace: true });
+    }, 500);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [append, searchParams, session?.access_token, setSearchParams]);
 
   const scrollTextArea = () => {
     const textarea = textareaRef.current;
