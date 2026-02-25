@@ -16,6 +16,7 @@ import { cubicEasingFn } from '~/utils/easings';
 import { createScopedLogger, renderLogger } from '~/utils/logger';
 import OutOfCreditsModal from '~/components/credits/OutOfCreditsModal';
 import { BaseChat } from './BaseChat';
+import GenerationProgress from './GenerationProgress';
 
 const toastAnimation = cssTransition({
   enter: 'animated fadeInRight',
@@ -373,6 +374,7 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
             scrollTextArea();
           });
         }}
+        generationProgress={<GenerationProgress isStreaming={isLoading} />}
       />
       <OutOfCreditsModal isOpen={showOutOfCredits} onClose={() => setShowOutOfCredits(false)} />
     </>

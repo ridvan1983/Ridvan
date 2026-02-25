@@ -7,7 +7,6 @@ import { Workbench } from '~/components/workbench/Workbench.client';
 import { brand } from '~/config/brand';
 import { examplePrompts } from '~/config/examplePrompts';
 import { classNames } from '~/utils/classNames';
-import GenerationProgress from './GenerationProgress';
 import { Messages } from './Messages.client';
 import { SendButton } from './SendButton.client';
 
@@ -28,6 +27,7 @@ interface BaseChatProps {
   sendMessage?: (event: React.UIEvent, messageInput?: string) => void;
   handleInputChange?: (event: React.ChangeEvent<HTMLTextAreaElement>) => void;
   enhancePrompt?: () => void;
+  generationProgress?: React.ReactNode;
 }
 
 const TEXTAREA_MIN_HEIGHT = 76;
@@ -49,6 +49,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
       handleInputChange,
       enhancePrompt,
       handleStop,
+      generationProgress,
     },
     ref,
   ) => {
@@ -109,7 +110,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                   ) : null;
                 }}
               </ClientOnly>
-              <GenerationProgress isStreaming={isStreaming} />
+              {generationProgress}
               <div
                 className={classNames('relative w-full max-w-chat mx-auto z-prompt', {
                   'sticky bottom-0': chatStarted,
