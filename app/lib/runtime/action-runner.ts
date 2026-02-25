@@ -36,6 +36,7 @@ type ActionsMap = MapStore<Record<string, ActionState>>;
 export class ActionRunner {
   #webcontainer: Promise<WebContainer>;
   #currentExecutionPromise: Promise<void> = Promise.resolve();
+  #lastErrorSetTime = 0;
 
   actions: ActionsMap = map({});
   lastBuildError: string | null = null;
@@ -139,6 +140,31 @@ export class ActionRunner {
       env: { npm_config_yes: true },
     });
     let processOutput = '';
+    const streamErrorPatterns = [
+      /\[plugin:vite:react-babel\]/i,
+      /SyntaxError/i,
+      /Unexpected token/i,
+      /Module not found/i,
+      /Cannot find module/i,
+      /ERROR in/i,
+      /Failed to resolve/i,
+    ];
+
+    const trySetStreamBuildError = () => {
+      const rollingOutput = processOutput.slice(-3000);
+      const hasErrorPattern = streamErrorPatterns.some((pattern) => pattern.test(rollingOutput));
+
+      if (!hasErrorPattern) {
+        return;
+      }
+
+      if (Date.now() - this.#lastErrorSetTime < 5000) {
+        return;
+      }
+
+      this.#lastErrorSetTime = Date.now();
+      this.lastBuildError = processOutput.slice(-1500);
+    };
 
     action.abortSignal.addEventListener('abort', () => {
       process.kill();
@@ -149,6 +175,7 @@ export class ActionRunner {
         write(data) {
           const text = typeof data === 'string' ? data : String(data);
           processOutput += text;
+          trySetStreamBuildError();
           console.log(text);
         },
       }),

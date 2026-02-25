@@ -75,7 +75,9 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fixAttemptCount = useRef(0);
-  const buildRetryTimeoutRef = useRef<number | null>(null);
+  const buildPollIntervalRef = useRef<number | null>(null);
+  const buildPollStartTimeoutRef = useRef<number | null>(null);
+  const buildPollStopTimeoutRef = useRef<number | null>(null);
   const autoSubmittedRef = useRef(false);
 
   const [chatStarted, setChatStarted] = useState(initialMessages.length > 0);
@@ -97,6 +99,23 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
     }
 
     return null;
+  };
+
+  const clearBuildErrorPolling = () => {
+    if (buildPollStartTimeoutRef.current !== null) {
+      window.clearTimeout(buildPollStartTimeoutRef.current);
+      buildPollStartTimeoutRef.current = null;
+    }
+
+    if (buildPollIntervalRef.current !== null) {
+      window.clearInterval(buildPollIntervalRef.current);
+      buildPollIntervalRef.current = null;
+    }
+
+    if (buildPollStopTimeoutRef.current !== null) {
+      window.clearTimeout(buildPollStopTimeoutRef.current);
+      buildPollStopTimeoutRef.current = null;
+    }
   };
 
   const { messages, isLoading, input, handleInputChange, setInput, stop, append } = useChat({
@@ -124,20 +143,16 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
     onFinish: () => {
       logger.debug('Finished streaming');
 
-      if (buildRetryTimeoutRef.current !== null) {
-        window.clearTimeout(buildRetryTimeoutRef.current);
-      }
+      clearBuildErrorPolling();
 
-      buildRetryTimeoutRef.current = window.setTimeout(async () => {
+      const checkBuildErrorAndRetry = async () => {
         const buildError = getAndClearBuildError();
 
         if (!buildError) {
-          if (fixAttemptCount.current > 0) {
-            fixAttemptCount.current = 0;
-          }
-
           return;
         }
+
+        clearBuildErrorPolling();
 
         if (fixAttemptCount.current < MAX_FIX_ATTEMPTS) {
           fixAttemptCount.current++;
@@ -151,7 +166,23 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
 
         toast.error(`Build failed after ${MAX_FIX_ATTEMPTS} attempts. Check the error in the terminal.`);
         fixAttemptCount.current = 0;
+      };
+
+      buildPollStartTimeoutRef.current = window.setTimeout(() => {
+        checkBuildErrorAndRetry();
+
+        buildPollIntervalRef.current = window.setInterval(() => {
+          checkBuildErrorAndRetry();
+        }, 2000);
       }, 3000);
+
+      buildPollStopTimeoutRef.current = window.setTimeout(() => {
+        clearBuildErrorPolling();
+
+        if (fixAttemptCount.current > 0) {
+          fixAttemptCount.current = 0;
+        }
+      }, 30000);
     },
     initialMessages,
   });
@@ -175,9 +206,7 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
 
   useEffect(() => {
     return () => {
-      if (buildRetryTimeoutRef.current !== null) {
-        window.clearTimeout(buildRetryTimeoutRef.current);
-      }
+      clearBuildErrorPolling();
     };
   }, []);
 
@@ -276,11 +305,7 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
     setShowOutOfCredits(false);
 
     fixAttemptCount.current = 0;
-
-    if (buildRetryTimeoutRef.current !== null) {
-      window.clearTimeout(buildRetryTimeoutRef.current);
-      buildRetryTimeoutRef.current = null;
-    }
+    clearBuildErrorPolling();
 
     chatStore.setKey('aborted', false);
 
