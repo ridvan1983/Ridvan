@@ -7,6 +7,7 @@ import { Workbench } from '~/components/workbench/Workbench.client';
 import { brand } from '~/config/brand';
 import { examplePrompts } from '~/config/examplePrompts';
 import { classNames } from '~/utils/classNames';
+import GenerationProgress from './GenerationProgress';
 import { Messages } from './Messages.client';
 import { SendButton } from './SendButton.client';
 
@@ -108,6 +109,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                   ) : null;
                 }}
               </ClientOnly>
+              <GenerationProgress isStreaming={isStreaming} />
               <div
                 className={classNames('relative w-full max-w-chat mx-auto z-prompt', {
                   'sticky bottom-0': chatStarted,
