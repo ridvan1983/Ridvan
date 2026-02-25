@@ -11,8 +11,8 @@ export const stripe = new Stripe(stripeSecretKey, {
 });
 
 export const PLANS = {
-  free: { name: 'Free', price: 0, monthlyCredits: 0, dailyCredits: 5, rolloverPercent: 0 },
-  starter: { name: 'Starter', price: 1900, monthlyCredits: 100, dailyCredits: 5, rolloverPercent: 20 },
-  pro: { name: 'Pro', price: 4900, monthlyCredits: 300, dailyCredits: 5, rolloverPercent: 20 },
-  business: { name: 'Business', price: 9900, monthlyCredits: 800, dailyCredits: 5, rolloverPercent: 25 },
+  free: { name: 'Free', price: 0, monthlyCredits: 50, dailyCredits: 0, rolloverPercent: 0 },
+  starter: { name: 'Starter', price: 1900, monthlyCredits: 200, dailyCredits: 0, rolloverPercent: 20 },
+  pro: { name: 'Pro', price: 5900, monthlyCredits: 800, dailyCredits: 0, rolloverPercent: 20 },
+  business: { name: 'Agency', price: 14900, monthlyCredits: 2500, dailyCredits: 0, rolloverPercent: 25 },
 } as const;

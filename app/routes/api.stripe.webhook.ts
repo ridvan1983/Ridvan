@@ -38,6 +38,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             plan: planId,
             stripe_subscription_id: typeof session.subscription === 'string' ? session.subscription : null,
             monthly_credits: plan.monthlyCredits,
+            daily_credits: plan.dailyCredits,
             status: 'active',
           },
           { onConflict: 'user_id' },
@@ -76,7 +77,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
       if (subscriptionId) {
         await supabaseAdmin
           .from('subscriptions')
-          .update({ status: 'cancelled', plan: 'free', monthly_credits: 0 })
+          .update({
+            status: 'cancelled',
+            plan: 'free',
+            monthly_credits: PLANS.free.monthlyCredits,
+            daily_credits: PLANS.free.dailyCredits,
+          })
           .eq('stripe_subscription_id', subscriptionId);
       }
     }

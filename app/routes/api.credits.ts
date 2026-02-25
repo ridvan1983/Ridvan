@@ -43,13 +43,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   if (!subscription) {
-    return Response.json({ plan: 'free', credits: 0, dailyCredits: 5, status: 'active' });
+    return Response.json({ plan: 'free', credits: 50, dailyCredits: 0, status: 'active' });
   }
 
   return Response.json({
     plan: subscription.plan ?? 'free',
     credits: subscription.monthly_credits ?? 0,
-    dailyCredits: subscription.daily_credits ?? 5,
+    dailyCredits: subscription.daily_credits ?? 0,
     status: subscription.status ?? 'active',
   });
 }

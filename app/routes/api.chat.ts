@@ -12,6 +12,24 @@ export async function action(args: ActionFunctionArgs) {
   return chatAction(args);
 }
 
+function getUsageTotals(usage: unknown) {
+  if (!usage || typeof usage !== 'object') {
+    return { inputTokens: 0, outputTokens: 0, hasUsage: false };
+  }
+
+  const usageData = usage as Record<string, unknown>;
+  const inputTokens = Number(usageData.inputTokens ?? usageData.promptTokens ?? 0);
+  const outputTokens = Number(usageData.outputTokens ?? usageData.completionTokens ?? 0);
+
+  const hasUsage = Number.isFinite(inputTokens) && Number.isFinite(outputTokens) && (inputTokens > 0 || outputTokens > 0);
+
+  return {
+    inputTokens: Number.isFinite(inputTokens) ? inputTokens : 0,
+    outputTokens: Number.isFinite(outputTokens) ? outputTokens : 0,
+    hasUsage,
+  };
+}
+
 async function chatAction({ context, request }: ActionFunctionArgs) {
   console.log('[RIDVAN DEBUG] ENV CHECK:', {
     hasApiKey: !!process.env.ANTHROPIC_API_KEY,
@@ -82,12 +100,52 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
   const { messages } = await request.json<{ messages: Messages }>();
 
   const stream = new SwitchableStream();
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  let totalOutputChars = 0;
+  let hasUsageData = false;
+  let deductionApplied = false;
 
   try {
+    const applyUsageBasedDeduction = async () => {
+      if (deductionApplied) {
+        return;
+      }
+
+      deductionApplied = true;
+
+      const costCredits = hasUsageData
+        ? Math.max(1, Math.ceil((totalInputTokens + totalOutputTokens) / 1000))
+        : Math.max(1, Math.ceil(totalOutputChars / 2000)); // Fallback for streaming cases where token usage is unavailable.
+
+      const deduction = await deductCredit(user.id, 'AI generation', costCredits);
+
+      if (!deduction.success) {
+        console.error('[RIDVAN-E012] Failed to deduct usage-based credits after generation');
+      }
+    };
+
     const options: StreamingOptions = {
       toolChoice: 'none',
-      onFinish: async ({ text: content, finishReason }) => {
+      onFinish: async (event) => {
+        const { text: content, finishReason, usage } = event as {
+          text: string;
+          finishReason: string;
+          usage?: unknown;
+        };
+
+        totalOutputChars += content.length;
+
+        const totals = getUsageTotals(usage);
+
+        if (totals.hasUsage) {
+          hasUsageData = true;
+          totalInputTokens += totals.inputTokens;
+          totalOutputTokens += totals.outputTokens;
+        }
+
         if (finishReason !== 'length') {
+          await applyUsageBasedDeduction();
           return stream.close();
         }
 
@@ -109,19 +167,6 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
     };
 
     const result = await streamText(messages, context.cloudflare.env, options);
-
-    const deduction = await deductCredit(user.id, 'AI generation');
-
-    if (!deduction.success) {
-      return Response.json(
-        {
-          error: deduction.error ?? '[RIDVAN-E012] Failed to deduct credit',
-        },
-        {
-          status: 500,
-        },
-      );
-    }
 
     stream.switchSource(result.toAIStream());
 
