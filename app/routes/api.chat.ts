@@ -5,6 +5,7 @@ import { MAX_RESPONSE_SEGMENTS, MAX_TOKENS } from '~/lib/.server/llm/constants';
 import { CONTINUE_PROMPT } from '~/lib/.server/llm/prompts';
 import { streamText, type Messages, type StreamingOptions } from '~/lib/.server/llm/stream-text';
 import SwitchableStream from '~/lib/.server/llm/switchable-stream';
+import { chatRateLimiter } from '~/lib/security/rate-limiter';
 import { supabaseAdmin } from '~/lib/supabase/server';
 
 export async function action(args: ActionFunctionArgs) {
@@ -45,6 +46,20 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
       { error: `[RIDVAN-E013] Unauthorized: ${userError?.message ?? 'invalid token'}` },
       {
         status: 401,
+      },
+    );
+  }
+
+  const rateLimit = chatRateLimiter.check(user.id);
+
+  if (!rateLimit.allowed) {
+    return Response.json(
+      {
+        error: '[RIDVAN-E501] Rate limit exceeded. Max 20 generations per hour.',
+        resetInMs: rateLimit.resetInMs,
+      },
+      {
+        status: 429,
       },
     );
   }
@@ -114,6 +129,8 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
       status: 200,
       headers: {
         contentType: 'text/plain; charset=utf-8',
+        'X-RateLimit-Remaining': String(rateLimit.remaining),
+        'X-RateLimit-Reset': String(rateLimit.resetInMs),
       },
     });
   } catch (error) {
