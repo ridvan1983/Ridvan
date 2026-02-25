@@ -85,11 +85,15 @@ export class StreamingMessageParser {
 
         if (state.insideAction) {
           const closeIndex = input.indexOf(ARTIFACT_ACTION_TAG_CLOSE, i);
+          const corruptIndex = input.indexOf(ARTIFACT_ACTION_TAG_OPEN, i);
 
           const currentAction = state.currentAction;
 
-          if (closeIndex !== -1) {
-            currentAction.content += input.slice(i, closeIndex);
+          const hasCorruption = corruptIndex !== -1 && (closeIndex === -1 || corruptIndex < closeIndex);
+
+          if (closeIndex !== -1 || hasCorruption) {
+            const contentEndIndex = hasCorruption ? corruptIndex : closeIndex;
+            currentAction.content += input.slice(i, contentEndIndex);
 
             let content = currentAction.content.trim();
 
@@ -116,7 +120,12 @@ export class StreamingMessageParser {
             state.insideAction = false;
             state.currentAction = { content: '' };
 
-            i = closeIndex + ARTIFACT_ACTION_TAG_CLOSE.length;
+            if (hasCorruption) {
+              logger.warn('Truncation detected: <boltAction> found inside file content');
+              i = corruptIndex;
+            } else {
+              i = closeIndex + ARTIFACT_ACTION_TAG_CLOSE.length;
+            }
           } else {
             break;
           }
