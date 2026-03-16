@@ -1,3 +1,4 @@
+import { useNavigate } from '@remix-run/react';
 import { useState } from 'react';
 import { brand } from '~/config/brand';
 import { useAuth } from '~/lib/auth/AuthContext';
@@ -43,8 +44,25 @@ const paidPlans: PaidPlan[] = [
 ];
 
 export function PricingPage() {
-  const { session } = useAuth();
+  const navigate = useNavigate();
+  const { user, session, signOut } = useAuth();
   const [loadingPlanId, setLoadingPlanId] = useState<PaidPlanId | null>(null);
+  const [isSigningOut, setIsSigningOut] = useState(false);
+
+  const handleSignOut = async () => {
+    if (isSigningOut) {
+      return;
+    }
+
+    setIsSigningOut(true);
+
+    try {
+      await signOut();
+      navigate('/login', { replace: true });
+    } finally {
+      setIsSigningOut(false);
+    }
+  };
 
   const handleUpgrade = async (planId: PaidPlanId) => {
     if (!session?.access_token) {
@@ -82,6 +100,38 @@ export function PricingPage() {
   return (
     <div className="min-h-screen bg-bolt-elements-background-depth-1 text-bolt-elements-textPrimary">
       <div className="max-w-7xl mx-auto px-6 py-16">
+        <div className="mb-10 flex items-center justify-between gap-3">
+          <a href="/" className="text-xl font-semibold">
+            {brand.appName}
+          </a>
+          <div className="flex items-center gap-2">
+            {user ? (
+              <>
+                <a
+                  href="/chat"
+                  className="rounded-lg border border-bolt-elements-borderColor px-3 py-1.5 text-sm hover:bg-bolt-elements-background-depth-3"
+                >
+                  Chat
+                </a>
+                <button
+                  type="button"
+                  onClick={handleSignOut}
+                  disabled={isSigningOut}
+                  className="rounded-lg border border-bolt-elements-borderColor px-3 py-1.5 text-sm text-bolt-elements-textSecondary hover:text-bolt-elements-textPrimary hover:bg-bolt-elements-background-depth-3 disabled:opacity-60"
+                >
+                  {isSigningOut ? 'Logging out...' : 'Log out'}
+                </button>
+              </>
+            ) : (
+              <a
+                href="/login"
+                className="rounded-lg border border-bolt-elements-borderColor px-3 py-1.5 text-sm hover:bg-bolt-elements-background-depth-3"
+              >
+                Log in
+              </a>
+            )}
+          </div>
+        </div>
         <div className="text-center">
           <h1 className="text-4xl sm:text-5xl font-bold">Simple, transparent pricing</h1>
           <p className="mt-4 text-bolt-elements-textSecondary">

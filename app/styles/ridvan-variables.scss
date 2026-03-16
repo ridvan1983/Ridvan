@@ -1,0 +1,152 @@
+/* Ridvan Branding Variables */
+/* Built on top of bolt.new core - respecting MIT license */
+
+/* Import Ridvan branding configuration */
+@import '../config/ridvan-branding.css';
+
+/* Ridvan Color Tokens Light Theme */
+:root,
+:root[data-theme='light'] {
+  /* Core Ridvan branding variables */
+  --ridvan-elements-borderColor: #e2e8f0;
+  --ridvan-elements-borderColorActive: #4f46e5;
+
+  --ridvan-elements-bg-depth-1: #ffffff;
+  --ridvan-elements-bg-depth-2: #f8fafc;
+  --ridvan-elements-bg-depth-3: #e2e8f0;
+  --ridvan-elements-bg-depth-4: #f1f5f9;
+
+  --ridvan-elements-textPrimary: #0f172a;
+  --ridvan-elements-textSecondary: #475569;
+  --ridvan-elements-textTertiary: #64748b;
+
+  --ridvan-elements-code-background: #f1f5f9;
+  --ridvan-elements-code-text: #0f172a;
+
+  --ridvan-elements-button-primary-background: #eef2ff;
+  --ridvan-elements-button-primary-backgroundHover: #e0e7ff;
+  --ridvan-elements-button-primary-text: #6366f1;
+
+  --ridvan-elements-button-secondary-background: #f8fafc;
+  --ridvan-elements-button-secondary-backgroundHover: #f1f5f9;
+  --ridvan-elements-button-secondary-text: #0f172a;
+
+  --ridvan-elements-button-danger-background: #fef2f2;
+  --ridvan-elements-button-danger-backgroundHover: #fee2e2;
+  --ridvan-elements-button-danger-text: #ef4444;
+
+  --ridvan-elements-item-contentDefault: #f8fafc;
+  --ridvan-elements-item-contentActive: #0f172a;
+  --ridvan-elements-item-contentAccent: #4338ca;
+  --ridvan-elements-item-contentDanger: #ef4444;
+  --ridvan-elements-item-backgroundDefault: rgba(0, 0, 0, 0);
+  --ridvan-elements-item-backgroundActive: #f8fafc;
+  --ridvan-elements-item-backgroundAccent: #eef2ff;
+  --ridvan-elements-item-backgroundDanger: #fef2f2;
+
+  --ridvan-elements-loader-background: #e2e8f0;
+  --ridvan-elements-loader-progress: #6366f1;
+
+  --ridvan-elements-artifacts-background: #ffffff;
+  --ridvan-elements-artifacts-backgroundHover: #f8fafc;
+  --ridvan-elements-artifacts-borderColor: var(--ridvan-elements-borderColor);
+  --ridvan-elements-artifacts-inlineCode-background: #f1f5f9;
+  --ridvan-elements-artifacts-inlineCode-text: var(--ridvan-elements-textPrimary);
+
+  --ridvan-elements-actions-background: #ffffff;
+  --ridvan-elements-actions-code-background: #1e293b;
+}
+
+/* Ridvan Color Tokens Dark Theme */
+:root[data-theme='dark'] {
+  --ridvan-elements-borderColor: #334155;
+  --ridvan-elements-borderColorActive: #818cf8;
+
+  --ridvan-elements-bg-depth-1: #0f172a;
+  --ridvan-elements-bg-depth-2: #1e293b;
+  --ridvan-elements-bg-depth-3: #334155;
+  --ridvan-elements-bg-depth-4: #475569;
+
+  --ridvan-elements-textPrimary: #f8fafc;
+  --ridvan-elements-textSecondary: #cbd5e1;
+  --ridvan-elements-textTertiary: #94a3b8;
+
+  --ridvan-elements-code-background: #1e293b;
+  --ridvan-elements-code-text: #f8fafc;
+
+  --ridvan-elements-button-primary-background: #312e81;
+  --ridvan-elements-button-primary-backgroundHover: #3730a3;
+  --ridvan-elements-button-primary-text: #c7d2fe;
+
+  --ridvan-elements-button-secondary-background: #1e293b;
+  --ridvan-elements-button-secondary-backgroundHover: #334155;
+  --ridvan-elements-button-secondary-text: #f8fafc;
+
+  --ridvan-elements-button-danger-background: #7f1d1d;
+  --ridvan-elements-button-danger-backgroundHover: #991b1b;
+  --ridvan-elements-button-danger-text: #fca5a5;
+
+  --ridvan-elements-item-contentDefault: #1e293b;
+  --ridvan-elements-item-contentActive: #f8fafc;
+  --ridvan-elements-item-contentAccent: #a5b4fc;
+  --ridvan-elements-item-contentDanger: #f87171;
+  --ridvan-elements-item-backgroundDefault: rgba(0, 0, 0, 0);
+  --ridvan-elements-item-backgroundActive: #334155;
+  --ridvan-elements-item-backgroundAccent: #312e81;
+  --ridvan-elements-item-backgroundDanger: #7f1d1d;
+
+  --ridvan-elements-loader-background: #334155;
+  --ridvan-elements-loader-progress: #818cf8;
+
+  --ridvan-elements-artifacts-background: #0f172a;
+  --ridvan-elements-artifacts-backgroundHover: #1e293b;
+  --ridvan-elements-artifacts-borderColor: var(--ridvan-elements-borderColor);
+  --ridvan-elements-artifacts-inlineCode-background: #1e293b;
+  --ridvan-elements-artifacts-inlineCode-text: var(--ridvan-elements-textPrimary);
+
+  --ridvan-elements-actions-background: #0f172a;
+  --ridvan-elements-actions-code-background: #334155;
+}
+
+/* Ridvan Typography */
+:root {
+  --ridvan-font-sans: 'Inter', system-ui, sans-serif;
+  --ridvan-font-mono: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  --ridvan-font-display: 'CalSans', 'Inter', system-ui, sans-serif;
+}
+
+/* Ridvan Spacing */
+:root {
+  --ridvan-spacing-xs: 0.25rem;
+  --ridvan-spacing-sm: 0.5rem;
+  --ridvan-spacing-md: 1rem;
+  --ridvan-spacing-lg: 1.5rem;
+  --ridvan-spacing-xl: 2rem;
+  --ridvan-spacing-2xl: 3rem;
+  --ridvan-spacing-3xl: 4rem;
+}
+
+/* Ridvan Border Radius */
+:root {
+  --ridvan-radius-sm: 0.25rem;
+  --ridvan-radius-md: 0.375rem;
+  --ridvan-radius-lg: 0.5rem;
+  --ridvan-radius-xl: 0.75rem;
+  --ridvan-radius-2xl: 1rem;
+  --ridvan-radius-full: 9999px;
+}
+
+/* Ridvan Shadows */
+:root {
+  --ridvan-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --ridvan-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+  --ridvan-shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1);
+  --ridvan-shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1);
+}
+
+/* Ridvan Transitions */
+:root {
+  --ridvan-transition-fast: 150ms ease-in-out;
+  --ridvan-transition-base: 250ms ease-in-out;
+  --ridvan-transition-slow: 350ms ease-in-out;
+}

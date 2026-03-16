@@ -4,6 +4,7 @@ import { toast } from 'react-toastify';
 import { Dialog, DialogButton, DialogDescription, DialogRoot, DialogTitle } from '~/components/ui/Dialog';
 import { IconButton } from '~/components/ui/IconButton';
 import { ThemeSwitch } from '~/components/ui/ThemeSwitch';
+import { useAuth } from '~/lib/auth/AuthContext';
 import { db, deleteById, getAll, chatId, type ChatHistoryItem } from '~/lib/persistence';
 import { cubicEasingFn } from '~/utils/easings';
 import { logger } from '~/utils/logger';
@@ -38,6 +39,8 @@ export function Menu() {
   const [list, setList] = useState<ChatHistoryItem[]>([]);
   const [open, setOpen] = useState(false);
   const [dialogContent, setDialogContent] = useState<DialogContent>(null);
+  const [isSigningOut, setIsSigningOut] = useState(false);
+  const { signOut } = useAuth();
 
   const loadEntries = useCallback(() => {
     if (db) {
@@ -70,6 +73,24 @@ export function Menu() {
 
   const closeDialog = () => {
     setDialogContent(null);
+  };
+
+  const handleSignOut = async () => {
+    if (isSigningOut) {
+      return;
+    }
+
+    setIsSigningOut(true);
+
+    try {
+      await signOut();
+      window.location.href = '/login';
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to sign out';
+      toast.error(message);
+      logger.error(error);
+      setIsSigningOut(false);
+    }
   };
 
   useEffect(() => {
@@ -163,7 +184,16 @@ export function Menu() {
             </Dialog>
           </DialogRoot>
         </div>
-        <div className="flex items-center border-t border-bolt-elements-borderColor p-4">
+        <div className="flex items-center gap-2 border-t border-bolt-elements-borderColor p-4">
+          <button
+            type="button"
+            onClick={handleSignOut}
+            disabled={isSigningOut}
+            className="inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm text-bolt-elements-sidebar-buttonText bg-bolt-elements-sidebar-buttonBackgroundDefault hover:bg-bolt-elements-sidebar-buttonBackgroundHover transition-theme disabled:opacity-60"
+          >
+            <span className="i-ph:sign-out-bold" />
+            {isSigningOut ? 'Logging out...' : 'Log out'}
+          </button>
           <ThemeSwitch className="ml-auto" />
         </div>
       </div>

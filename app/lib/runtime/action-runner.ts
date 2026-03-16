@@ -36,19 +36,11 @@ type ActionsMap = MapStore<Record<string, ActionState>>;
 export class ActionRunner {
   #webcontainer: Promise<WebContainer>;
   #currentExecutionPromise: Promise<void> = Promise.resolve();
-  #lastErrorSetTime = 0;
 
   actions: ActionsMap = map({});
-  lastBuildError: string | null = null;
 
   constructor(webcontainerPromise: Promise<WebContainer>) {
     this.#webcontainer = webcontainerPromise;
-  }
-
-  getAndClearBuildError() {
-    const error = this.lastBuildError;
-    this.lastBuildError = null;
-    return error;
   }
 
   addAction(data: ActionCallbackData) {
@@ -139,32 +131,6 @@ export class ActionRunner {
     const process = await webcontainer.spawn('jsh', ['-c', action.content], {
       env: { npm_config_yes: true },
     });
-    let processOutput = '';
-    const streamErrorPatterns = [
-      /\[plugin:vite:react-babel\]/i,
-      /SyntaxError/i,
-      /Unexpected token/i,
-      /Module not found/i,
-      /Cannot find module/i,
-      /ERROR in/i,
-      /Failed to resolve/i,
-    ];
-
-    const trySetStreamBuildError = () => {
-      const rollingOutput = processOutput.slice(-3000);
-      const hasErrorPattern = streamErrorPatterns.some((pattern) => pattern.test(rollingOutput));
-
-      if (!hasErrorPattern) {
-        return;
-      }
-
-      if (Date.now() - this.#lastErrorSetTime < 5000) {
-        return;
-      }
-
-      this.#lastErrorSetTime = Date.now();
-      this.lastBuildError = processOutput.slice(-1500);
-    };
 
     action.abortSignal.addEventListener('abort', () => {
       process.kill();
@@ -173,30 +139,13 @@ export class ActionRunner {
     process.output.pipeTo(
       new WritableStream({
         write(data) {
-          const text = typeof data === 'string' ? data : String(data);
-          processOutput += text;
-          trySetStreamBuildError();
-          console.log(text);
+          console.log(data);
         },
       }),
     );
 
     const exitCode = await process.exit;
 
-    if (action.abortSignal.aborted) {
-      this.lastBuildError = null;
-      logger.debug(`Process aborted with code ${exitCode}`);
-      return;
-    }
-
-    if (exitCode !== 0) {
-      const output = processOutput.trim();
-      this.lastBuildError = (output.length > 0 ? output : `Command exited with code ${exitCode}`).slice(-1500);
-      logger.error(`[RIDVAN-E301] Build failed (exit code ${exitCode})\n\n${this.lastBuildError}`);
-      throw new Error('[RIDVAN-E301] Build failed');
-    }
-
-    this.lastBuildError = null;
     logger.debug(`Process terminated with code ${exitCode}`);
   }
 

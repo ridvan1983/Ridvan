@@ -6,6 +6,7 @@ import { HeaderActionButtons } from './HeaderActionButtons.client';
 import { ChatDescription } from '~/lib/persistence/ChatDescription.client';
 import { brand } from '~/config/brand';
 import CreditDisplay from '~/components/credits/CreditDisplay';
+import { SafeImage } from '~/components/ui/SafeImage';
 
 export function Header() {
   const chat = useStore(chatStore);
@@ -21,7 +22,12 @@ export function Header() {
       )}
     >
       <div className="flex items-center gap-2 z-logo text-bolt-elements-textPrimary cursor-pointer">
-        <div className="i-ph:sidebar-simple-duotone text-xl" />
+        <SafeImage
+          src="/favicon.svg"
+          alt={`${brand.appName} logo`}
+          className="h-6 w-6 rounded object-cover"
+          loading="eager"
+        />
         <a href="/" className="text-2xl font-semibold text-accent flex items-center">
           {brand.appName}
         </a>

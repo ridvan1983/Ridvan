@@ -83,22 +83,13 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
 
   const [chatStarted, setChatStarted] = useState(initialMessages.length > 0);
   const [showOutOfCredits, setShowOutOfCredits] = useState(false);
+  const [overloadMessage, setOverloadMessage] = useState<string | null>(null);
 
   const { showChat } = useStore(chatStore);
 
   const [animationScope, animate] = useAnimate();
 
   const getAndClearBuildError = () => {
-    const artifacts = workbenchStore.artifacts.get();
-
-    for (const artifactId of [...workbenchStore.artifactIdList].reverse()) {
-      const buildError = artifacts[artifactId]?.runner.getAndClearBuildError();
-
-      if (buildError) {
-        return buildError;
-      }
-    }
-
     return null;
   };
 
@@ -126,13 +117,70 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
           Authorization: `Bearer ${session.access_token}`,
         }
       : undefined,
+    onResponse: async (response) => {
+      const ct = response.headers.get('content-type') ?? '';
+      const isJson = ct.includes('application/json');
+
+      if (!isJson && response.status !== 503) {
+        return;
+      }
+
+      try {
+        const data = (await response.clone().json().catch(() => null)) as
+          | {
+              type?: string;
+              message?: string;
+              error?: { code?: string; message?: string };
+            }
+          | null;
+        const isOverloaded = data?.type === 'overloaded_error' || data?.error?.code === 'LLM_OVERLOADED';
+
+        if (isOverloaded || response.status === 503) {
+          const overloadText =
+            data?.error?.message ?? data?.message ?? 'Model is temporarily overloaded. Please try again in a moment.';
+          setOverloadMessage(overloadText);
+          throw new Error(`LLM_OVERLOADED: ${overloadText}`);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error ?? '');
+
+        if (message.includes('LLM_OVERLOADED')) {
+          throw error;
+        }
+
+        if (response.status === 503) {
+          setOverloadMessage('Model is temporarily overloaded. Please try again in a moment.');
+          throw new Error('LLM_OVERLOADED: Model is temporarily overloaded. Please try again in a moment.');
+        }
+      }
+    },
     onError: (error) => {
       logger.error('Request failed\n\n', error);
+      const rawMessage = (error as any)?.message ?? (error as any)?.cause?.message;
+      if (typeof rawMessage === 'string' && rawMessage.includes('LLM_OVERLOADED')) {
+        const text = rawMessage.replace(/^LLM_OVERLOADED:\s*/i, '').trim();
+        setOverloadMessage(text || 'Model is temporarily overloaded. Please try again in a moment.');
+        return;
+      }
+
       const status =
         (error as any)?.status ??
         (error as any)?.statusCode ??
         (error as any)?.cause?.status ??
         (error as any)?.cause?.statusCode;
+
+      if (status === 503) {
+        const code = (error as any)?.cause?.error?.code ?? (error as any)?.error?.code;
+        const message =
+          (error as any)?.cause?.error?.message ??
+          (error as any)?.error?.message ??
+          'Model is temporarily overloaded. Please try again in a moment.';
+
+        if (code === 'LLM_OVERLOADED' || String(message).toLowerCase().includes('overload')) {
+          setOverloadMessage(message);
+          return;
+        }
+      }
 
       if (status === 403) {
         setShowOutOfCredits(true);
@@ -304,6 +352,7 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
 
     const fileModifications = workbenchStore.getFileModifcations();
     setShowOutOfCredits(false);
+    setOverloadMessage(null);
 
     fixAttemptCount.current = 0;
     clearBuildErrorPolling();
@@ -358,21 +407,38 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
         scrollRef={scrollRef}
         handleInputChange={handleInputChange}
         handleStop={abort}
-        messages={messages.map((message, i) => {
-          if (message.role === 'user') {
-            return message;
+        messages={[
+          ...messages.map((message, i) => {
+            if (message.role === 'user') {
+              return message;
+            }
+
+            return {
+              ...message,
+              content: parsedMessages[i] || '',
+            };
+          }),
+          ...(overloadMessage
+            ? ([
+                {
+                  id: 'llm-overloaded',
+                  role: 'assistant',
+                  content: overloadMessage,
+                },
+              ] as Message[])
+            : []),
+        ]}
+        enhancePrompt={() => {
+          if (!input.trim()) {
+            toast.error('Write a prompt first.');
+            textareaRef.current?.focus();
+            return;
           }
 
-          return {
-            ...message,
-            content: parsedMessages[i] || '',
-          };
-        })}
-        enhancePrompt={() => {
           enhancePrompt(input, (input) => {
             setInput(input);
             scrollTextArea();
-          });
+          }, session?.access_token);
         }}
         generationProgress={<GenerationProgress isStreaming={isLoading} />}
       />

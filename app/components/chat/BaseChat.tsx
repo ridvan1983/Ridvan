@@ -180,7 +180,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                     <div className="flex gap-1 items-center">
                       <IconButton
                         title="Enhance prompt"
-                        disabled={input.length === 0 || enhancingPrompt}
+                        disabled={enhancingPrompt}
                         className={classNames({
                           'opacity-100!': enhancingPrompt,
                           'text-bolt-elements-item-contentAccent! pr-1.5 enabled:hover:bg-bolt-elements-item-backgroundAccent!':
@@ -196,7 +196,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                         ) : (
                           <>
                             <div className="i-bolt:stars text-xl"></div>
-                            {promptEnhanced && <div className="ml-1.5">Prompt enhanced</div>}
+                            <div className="ml-1.5">{promptEnhanced ? 'Prompt enhanced' : 'AI Enhance'}</div>
                           </>
                         )}
                       </IconButton>

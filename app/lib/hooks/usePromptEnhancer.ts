@@ -12,22 +12,31 @@ export function usePromptEnhancer() {
     setPromptEnhanced(false);
   };
 
-  const enhancePrompt = async (input: string, setInput: (value: string) => void) => {
+  const enhancePrompt = async (input: string, setInput: (value: string) => void, accessToken?: string) => {
     const originalInput = input;
 
     setEnhancingPrompt(true);
     setPromptEnhanced(false);
 
     try {
+      if (!accessToken) {
+        throw new Error('Missing auth session for prompt enhancement');
+      }
+
       const response = await fetch('/api/enhancer', {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: JSON.stringify({
           message: input,
         }),
       });
 
       if (!response.ok) {
-        throw new Error(`Enhancer request failed with status ${response.status}`);
+        const responseText = await response.text().catch(() => '');
+        throw new Error(`Enhancer request failed with status ${response.status}: ${responseText}`);
       }
 
       const reader = response.body?.getReader();

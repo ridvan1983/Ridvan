@@ -1,6 +1,6 @@
 {
-  "name": "bolt",
-  "description": "StackBlitz AI Agent",
+  "name": "ridvan",
+  "description": "Ridvan AI-Powered Full-Stack Development Platform",
   "private": true,
   "license": "MIT",
   "packageManager": "pnpm@9.4.0",

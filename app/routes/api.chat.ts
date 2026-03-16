@@ -8,6 +8,9 @@ import SwitchableStream from '~/lib/.server/llm/switchable-stream';
 import { chatRateLimiter } from '~/lib/security/rate-limiter';
 import { supabaseAdmin } from '~/lib/supabase/server';
 
+const OVERLOAD_RETRY_DELAYS_MS = [0, 250, 750] as const;
+const DEBUG = process.env.RIDVAN_DEBUG_CHAT === '1';
+
 export async function action(args: ActionFunctionArgs) {
   return chatAction(args);
 }
@@ -31,6 +34,10 @@ function getUsageTotals(usage: unknown) {
 }
 
 async function chatAction({ context, request }: ActionFunctionArgs) {
+  if (DEBUG) {
+    console.log('[RIDVAN DEBUG][api.chat] action:start', { method: request.method, url: request.url, ts: Date.now() });
+  }
+
   console.log('[RIDVAN DEBUG] ENV CHECK:', {
     hasApiKey: !!process.env.ANTHROPIC_API_KEY,
     keyPrefix: process.env.ANTHROPIC_API_KEY?.substring(0, 15),
@@ -100,11 +107,96 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
   const { messages } = await request.json<{ messages: Messages }>();
 
   const stream = new SwitchableStream();
+  let streamChunkCount = 0;
+  let streamByteCount = 0;
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   let totalOutputChars = 0;
   let hasUsageData = false;
   let deductionApplied = false;
+
+  const isOverloadedError = (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error ?? '');
+    const normalizedMessage = message.toLowerCase();
+
+    if (normalizedMessage.includes('overloaded')) {
+      return true;
+    }
+
+    if (!error || typeof error !== 'object') {
+      return false;
+    }
+
+    const errorData = error as Record<string, unknown>;
+    const nestedValues = [errorData.type, errorData.error, errorData.body, errorData.cause];
+
+    return nestedValues.some((value) => {
+      if (!value) {
+        return false;
+      }
+
+      if (typeof value === 'string') {
+        const lower = value.toLowerCase();
+        return lower.includes('overloaded_error') || lower.includes('overloaded');
+      }
+
+      if (typeof value === 'object') {
+        const maybeType = (value as Record<string, unknown>).type;
+        const maybeMessage = (value as Record<string, unknown>).message;
+        const typeText = typeof maybeType === 'string' ? maybeType.toLowerCase() : '';
+        const messageText = typeof maybeMessage === 'string' ? maybeMessage.toLowerCase() : '';
+
+        return typeText === 'overloaded_error' || messageText.includes('overloaded');
+      }
+
+      return false;
+    });
+  };
+
+  const streamTextWithOverloadRetry = async (inputMessages: Messages, options: StreamingOptions) => {
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt < OVERLOAD_RETRY_DELAYS_MS.length; attempt++) {
+      const delay = OVERLOAD_RETRY_DELAYS_MS[attempt];
+
+      if (delay > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+
+      try {
+        return await streamText(inputMessages, context.cloudflare.env, options);
+      } catch (error) {
+        if (!isOverloadedError(error)) {
+          throw error;
+        }
+
+        lastError = error;
+      }
+    }
+
+    throw lastError;
+  };
+
+  const getChunkSize = (chunk: unknown) => {
+    if (typeof chunk === 'string') {
+      return new TextEncoder().encode(chunk).byteLength;
+    }
+
+    if (chunk instanceof Uint8Array) {
+      return chunk.byteLength;
+    }
+
+    if (chunk instanceof ArrayBuffer) {
+      return chunk.byteLength;
+    }
+
+    if (chunk && typeof chunk === 'object' && 'byteLength' in (chunk as Record<string, unknown>)) {
+      const maybeByteLength = (chunk as { byteLength?: unknown }).byteLength;
+      return typeof maybeByteLength === 'number' ? maybeByteLength : 0;
+    }
+
+    return 0;
+  };
 
   try {
     const applyUsageBasedDeduction = async () => {
@@ -160,17 +252,57 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
         messages.push({ role: 'assistant', content });
         messages.push({ role: 'user', content: CONTINUE_PROMPT });
 
-        const result = await streamText(messages, context.cloudflare.env, options);
+        if (DEBUG) {
+          console.log('[RIDVAN DEBUG][api.chat] before:llm');
+        }
+        const result = await streamTextWithOverloadRetry(messages, options);
+        if (DEBUG) {
+          const responseLike = (result as any)?.response;
+          const contentType =
+            typeof responseLike?.headers?.get === 'function' ? responseLike.headers.get('content-type') : null;
+          console.log('[RIDVAN DEBUG][api.chat] return:type', {
+            isResponse: result instanceof Response,
+            contentType,
+          });
+        }
 
         return stream.switchSource(result.toAIStream());
       },
     };
 
-    const result = await streamText(messages, context.cloudflare.env, options);
+    if (DEBUG) {
+      console.log('[RIDVAN DEBUG][api.chat] before:llm');
+    }
+    const result = await streamTextWithOverloadRetry(messages, options);
+    if (DEBUG) {
+      const responseLike = (result as any)?.response;
+      const contentType = typeof responseLike?.headers?.get === 'function' ? responseLike.headers.get('content-type') : null;
+      console.log('[RIDVAN DEBUG][api.chat] return:type', {
+        isResponse: result instanceof Response,
+        contentType,
+      });
+    }
 
     stream.switchSource(result.toAIStream());
+    const outputStream = stream.readable.pipeThrough(
+      new TransformStream({
+        transform(chunk, controller) {
+          streamChunkCount++;
+          streamByteCount += getChunkSize(chunk);
+          controller.enqueue(chunk);
+        },
+        flush() {
+          if (DEBUG) {
+            console.log('[RIDVAN DEBUG][api.chat] stream:stats', { chunks: streamChunkCount, bytes: streamByteCount });
+          }
+        },
+      }),
+    );
 
-    return new Response(stream.readable, {
+    if (DEBUG) {
+      console.log('[RIDVAN DEBUG][api.chat] action:return:ok');
+    }
+    return new Response(outputStream, {
       status: 200,
       headers: {
         contentType: 'text/plain; charset=utf-8',
@@ -180,6 +312,29 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
     });
   } catch (error) {
     console.log(error);
+    if (DEBUG) {
+      console.log('[RIDVAN DEBUG][api.chat] action:error', error instanceof Error ? error.message : error);
+    }
+
+    if (isOverloadedError(error)) {
+      if (DEBUG) {
+        console.log('[RIDVAN DEBUG][api.chat] action:return:503');
+      }
+      return Response.json(
+        {
+          error: {
+            code: 'LLM_OVERLOADED',
+            message: 'Model is temporarily overloaded. Please try again in a moment.',
+          },
+        },
+        {
+          status: 503,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        },
+      );
+    }
 
     throw new Response(null, {
       status: 500,

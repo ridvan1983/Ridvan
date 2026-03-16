@@ -2,6 +2,7 @@ import { useNavigate } from '@remix-run/react';
 import { useState } from 'react';
 import { brand } from '~/config/brand';
 import { examplePrompts } from '~/config/examplePrompts';
+import { SafeImage } from '~/components/ui/SafeImage';
 
 export function LandingPage() {
   const navigate = useNavigate();
@@ -46,6 +47,13 @@ export function LandingPage() {
             <p className="mt-5 text-lg text-bolt-elements-textSecondary max-w-3xl">
               Describe what you want to build. Ridvan turns it into a working app in seconds.
             </p>
+          </div>
+
+          <div className="mt-8 max-w-4xl overflow-hidden rounded-2xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-2">
+            <SafeImage
+              alt="Landing hero"
+              className="h-56 w-full object-cover"
+            />
           </div>
 
           <div className="mt-8 max-w-4xl rounded-2xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 p-4">
