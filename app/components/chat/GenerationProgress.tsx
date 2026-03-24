@@ -1,5 +1,6 @@
 import { useStore } from '@nanostores/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ActionState } from '~/lib/runtime/action-runner';
 import { workbenchStore } from '~/lib/stores/workbench';
 
 interface GenerationProgressProps {
@@ -19,7 +20,7 @@ function getPhaseMessage(): string {
       continue;
     }
 
-    const actions = Object.values(artifact.runner.actions.get());
+    const actions = Object.values(artifact.runner.actions.get()) as ActionState[];
     const fileActions = actions.filter((action) => action.type === 'file');
     const shellActions = actions.filter((action) => action.type === 'shell');
 

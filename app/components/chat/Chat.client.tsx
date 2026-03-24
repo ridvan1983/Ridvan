@@ -2,13 +2,23 @@ import { useStore } from '@nanostores/react';
 import type { Message } from 'ai';
 import { useChat } from 'ai/react';
 import { useAnimate } from 'framer-motion';
-import { useSearchParams } from '@remix-run/react';
+import { useLocation, useNavigate, useSearchParams } from '@remix-run/react';
 import { memo, useEffect, useRef, useState } from 'react';
 import { cssTransition, toast, ToastContainer } from 'react-toastify';
 import { MAX_FIX_ATTEMPTS } from '~/config/constants';
 import { useAuth } from '~/lib/auth/AuthContext';
 import { useMessageParser, usePromptEnhancer, useShortcuts, useSnapScroll } from '~/lib/hooks';
 import { useChatHistory } from '~/lib/persistence';
+import { createSnapshot, getLatestSnapshot, upsertProject } from '~/lib/projects/api.client';
+import { ensurePreviewRunning } from '~/lib/projects/auto-preview.client';
+import { collectTextFiles, restoreSnapshotFiles } from '~/lib/projects/snapshot.client';
+import { organismAccessToken, organismProjectId, organismPreviewReadyAt, organismVerticalCardShownForProject } from '~/lib/stores/organism';
+import {
+  createChatSession,
+  getChatSession,
+  listChatSessions,
+  updateChatSessionMessages,
+} from '~/lib/projects/chat-sessions.api.client';
 import { chatStore } from '~/lib/stores/chat';
 import { workbenchStore } from '~/lib/stores/workbench';
 import { fileModificationsToHTML } from '~/utils/diff';
@@ -72,7 +82,10 @@ interface ChatProps {
 export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProps) => {
   useShortcuts();
   const { session } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const workbenchFiles = useStore(workbenchStore.files);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fixAttemptCount = useRef(0);
@@ -80,6 +93,71 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
   const buildPollStartTimeoutRef = useRef<number | null>(null);
   const buildPollStopTimeoutRef = useRef<number | null>(null);
   const autoSubmittedRef = useRef(false);
+  const initialSnapshotSavedRef = useRef(false);
+  const latestFilesRef = useRef(workbenchFiles);
+  const projectIdRef = useRef<string | null>(searchParams.get('projectId'));
+  const projectSessionIdRef = useRef<string | null>(searchParams.get('sessionId'));
+  const initialProjectChatLoadedRef = useRef(false);
+  const projectUpsertedRef = useRef(false);
+
+  const ensureProjectSessionId = async (projectId: string, titleHint?: string): Promise<string | null> => {
+    if (!session?.access_token) {
+      return null;
+    }
+
+    const existing = projectSessionIdRef.current ?? searchParams.get('sessionId');
+    if (existing?.trim()) {
+      return existing;
+    }
+
+    try {
+      const created = await createChatSession(session.access_token, projectId, {
+        title: titleHint?.slice(0, 80) ?? null,
+      });
+
+      projectSessionIdRef.current = created.id;
+      initialProjectChatLoadedRef.current = true;
+      setMessages(created.messages ?? []);
+
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.set('sessionId', created.id);
+      setSearchParams(nextParams, { replace: true });
+
+      return created.id;
+    } catch (error) {
+      logger.error('Failed to create project chat session', error);
+      return null;
+    }
+  };
+
+  const saveInitialSnapshotWithRetry = async (projectId: string) => {
+    if (!session?.access_token) {
+      return;
+    }
+
+    const startedAt = Date.now();
+    const timeoutMs = 15000;
+    const intervalMs = 750;
+
+    while (Date.now() - startedAt < timeoutMs) {
+      const filesPayload = collectTextFiles(latestFilesRef.current);
+      const hasFiles = Object.keys(filesPayload).length > 0;
+
+      if (!hasFiles) {
+        await new Promise<void>((resolve) => window.setTimeout(resolve, intervalMs));
+        continue;
+      }
+
+      await createSnapshot(session.access_token, {
+        projectId,
+        title: null,
+        files: filesPayload,
+      });
+
+      initialSnapshotSavedRef.current = true;
+      return;
+    }
+  };
 
   const [chatStarted, setChatStarted] = useState(initialMessages.length > 0);
   const [showOutOfCredits, setShowOutOfCredits] = useState(false);
@@ -110,7 +188,7 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
     }
   };
 
-  const { messages, isLoading, input, handleInputChange, setInput, stop, append } = useChat({
+  const { messages, isLoading, input, handleInputChange, setInput, stop, append, setMessages } = useChat({
     api: '/api/chat',
     headers: session?.access_token
       ? {
@@ -189,8 +267,22 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
 
       toast.error('There was an error processing your request');
     },
-    onFinish: () => {
+    onFinish: async () => {
       logger.debug('Finished streaming');
+
+      const projectIdParam = projectIdRef.current;
+      if (projectIdParam?.trim() && session?.access_token && !initialSnapshotSavedRef.current) {
+        try {
+          await saveInitialSnapshotWithRetry(projectIdParam);
+
+          if (!initialSnapshotSavedRef.current) {
+            toast.warn('Project created, but snapshot could not be saved');
+          }
+        } catch (error) {
+          logger.error('Failed to save initial snapshot', error);
+          toast.warn('Project created, but snapshot could not be saved');
+        }
+      }
 
       clearBuildErrorPolling();
 
@@ -236,6 +328,135 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
     initialMessages,
   });
 
+  useEffect(() => {
+    latestFilesRef.current = workbenchFiles;
+  }, [workbenchFiles]);
+
+  useEffect(() => {
+    // Canonicalize any client-side navigation that lands on /chat/:slug
+    // so we always use query-param URLs for project workspaces.
+    const projectId = searchParams.get('projectId');
+    if (!projectId?.trim()) {
+      return;
+    }
+
+    if (location.pathname.startsWith('/chat/') && location.pathname !== '/chat') {
+      const nextSearch = searchParams.toString();
+      navigate(`/chat${nextSearch ? `?${nextSearch}` : ''}`, { replace: true });
+    }
+  }, [location.pathname, navigate, searchParams]);
+
+  useEffect(() => {
+    projectIdRef.current = searchParams.get('projectId');
+    projectSessionIdRef.current = searchParams.get('sessionId');
+    organismProjectId.set(projectIdRef.current);
+    organismPreviewReadyAt.set(null);
+    organismVerticalCardShownForProject.set(null);
+
+    // If projectId changes, we should re-ensure Supabase persistence.
+    projectUpsertedRef.current = false;
+  }, [searchParams]);
+
+  useEffect(() => {
+    organismAccessToken.set(session?.access_token ?? null);
+
+    return () => {
+      organismAccessToken.set(null);
+    };
+  }, [session?.access_token]);
+
+  useEffect(() => {
+    const projectIdParam = searchParams.get('projectId');
+    const sessionIdParam = searchParams.get('sessionId');
+
+    if (!projectIdParam?.trim() || !session?.access_token) {
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const detail = sessionIdParam?.trim()
+          ? await getChatSession(session.access_token, projectIdParam, sessionIdParam)
+          : null;
+
+        if (cancelled) {
+          return;
+        }
+
+        if (detail) {
+          setMessages(detail.messages ?? []);
+          initialProjectChatLoadedRef.current = true;
+          return;
+        }
+
+        const sessions = await listChatSessions(session.access_token, projectIdParam);
+        if (cancelled) {
+          return;
+        }
+
+        const latest = sessions[0];
+        if (latest) {
+          const loaded = await getChatSession(session.access_token, projectIdParam, latest.id);
+          if (cancelled) {
+            return;
+          }
+          const nextParams = new URLSearchParams(searchParams);
+          nextParams.set('sessionId', latest.id);
+          setSearchParams(nextParams, { replace: true });
+          setMessages(loaded.messages ?? []);
+          initialProjectChatLoadedRef.current = true;
+          return;
+        }
+
+        const created = await createChatSession(session.access_token, projectIdParam);
+        if (cancelled) {
+          return;
+        }
+
+        const nextParams = new URLSearchParams(searchParams);
+        nextParams.set('sessionId', created.id);
+        setSearchParams(nextParams, { replace: true });
+        setMessages(created.messages ?? []);
+        initialProjectChatLoadedRef.current = true;
+      } catch (error) {
+        logger.error('Failed to load project chat session', error);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams, session?.access_token, setMessages, setSearchParams]);
+
+  useEffect(() => {
+    const projectIdParam = searchParams.get('projectId');
+    const sessionIdParam = searchParams.get('sessionId');
+
+    if (!projectIdParam?.trim() || !sessionIdParam?.trim() || !session?.access_token) {
+      return;
+    }
+
+    if (!initialProjectChatLoadedRef.current) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      // Keep supabase session messages in sync for project workspaces.
+      updateChatSessionMessages(session.access_token!, projectIdParam, sessionIdParam, {
+        title: null,
+        messages,
+      }).catch((error) => {
+        logger.error('Failed to persist project chat session', error);
+      });
+    }, 500);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [messages, searchParams, session?.access_token]);
+
   const { enhancingPrompt, promptEnhanced, enhancePrompt, resetEnhancer } = usePromptEnhancer();
   const { parsedMessages, parseMessages } = useMessageParser();
 
@@ -266,18 +487,146 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
       return;
     }
 
-    autoSubmittedRef.current = true;
-
     const timeoutId = window.setTimeout(async () => {
       runAnimation();
-      await append({ role: 'user', content: promptParam });
-      setSearchParams({}, { replace: true });
+
+      const ensured = await ensureProjectId(promptParam);
+      if (!ensured) {
+        toast.error('Could not save project to cloud. Please try again.');
+        return;
+      }
+
+      projectIdRef.current = ensured;
+
+      const ensuredSessionId = await ensureProjectSessionId(ensured, promptParam);
+      if (!ensuredSessionId) {
+        toast.error('Could not save project chat to cloud. Please try again.');
+        return;
+      }
+
+      const next = new URLSearchParams(searchParams);
+      next.delete('prompt');
+      next.set('projectId', ensured);
+      next.set('sessionId', ensuredSessionId);
+      setSearchParams(next, { replace: true });
+
+      try {
+        await append({ role: 'user', content: promptParam });
+        autoSubmittedRef.current = true;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error ?? '');
+        toast.error(message ? `Build failed: ${message}` : 'Build failed');
+        autoSubmittedRef.current = false;
+      }
     }, 500);
 
     return () => {
       window.clearTimeout(timeoutId);
     };
   }, [append, searchParams, session?.access_token, setSearchParams]);
+
+  const ensureProjectId = async (titleHint?: string): Promise<string | null> => {
+    if (!session?.access_token) {
+      return null;
+    }
+
+    const existing = searchParams.get('projectId');
+    if (existing?.trim()) {
+      // Landing page can provide a client-generated id. We still must upsert it
+      // in Supabase before we can create project sessions/snapshots.
+      if (!projectUpsertedRef.current) {
+        try {
+          await upsertProject(session.access_token, { id: existing, title: titleHint?.slice(0, 80) ?? null });
+          projectUpsertedRef.current = true;
+          toast.success('Project saved');
+        } catch (error) {
+          logger.error('Failed to upsert project', error);
+          toast.error('Could not save project to cloud');
+          return null;
+        }
+      }
+
+      return existing;
+    }
+
+    let id = '';
+    try {
+      id = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : '';
+    } catch {
+      id = '';
+    }
+
+    if (!id) {
+      // Very small UUIDv4 fallback; good enough for client-side id generation.
+      id = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (ch) => {
+        const r = Math.floor(Math.random() * 16);
+        const v = ch === 'x' ? r : (r & 0x3) | 0x8;
+        return v.toString(16);
+      });
+    }
+
+    try {
+      await upsertProject(session.access_token, { id, title: titleHint?.slice(0, 80) ?? null });
+      projectUpsertedRef.current = true;
+      toast.success('Project saved');
+      return id;
+    } catch (error) {
+      logger.error('Failed to upsert project', error);
+      toast.error('Could not save project to cloud');
+      return null;
+    }
+  };
+
+  useEffect(() => {
+    const projectIdParam = searchParams.get('projectId');
+
+    if (!projectIdParam?.trim() || !session?.access_token) {
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        // Show workspace immediately; snapshot/preview will hydrate in background.
+        chatStore.setKey('started', true);
+        setChatStarted(true);
+        workbenchStore.showWorkbench.set(true);
+        workbenchStore.currentView.set('preview');
+
+        const snapshot = await getLatestSnapshot(session.access_token, projectIdParam);
+
+        if (cancelled) {
+          return;
+        }
+
+        if (!snapshot) {
+          toast.error('This project has no saved snapshot yet.');
+          workbenchStore.currentView.set('code');
+          return;
+        }
+
+        await restoreSnapshotFiles(snapshot.files);
+        await ensurePreviewRunning();
+
+        if (cancelled) {
+          return;
+        }
+
+        chatStore.setKey('started', true);
+        setChatStarted(true);
+        workbenchStore.showWorkbench.set(true);
+        workbenchStore.currentView.set('preview');
+      } catch (error) {
+        logger.error('Failed to open project snapshot', error);
+        toast.error('Failed to open project');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams, session?.access_token]);
 
   const scrollTextArea = () => {
     const textarea = textareaRef.current;
@@ -350,6 +699,25 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
      */
     await workbenchStore.saveAllFiles();
 
+    const ensured = await ensureProjectId(_input);
+    if (!ensured) {
+      toast.error('Could not save project to cloud. Please try again.');
+      return;
+    }
+
+    projectIdRef.current = ensured;
+
+    const ensuredSessionId = await ensureProjectSessionId(ensured, _input);
+    if (!ensuredSessionId) {
+      toast.error('Could not save project chat to cloud. Please try again.');
+      return;
+    }
+
+    const next = new URLSearchParams(searchParams);
+    next.set('projectId', ensured);
+    next.set('sessionId', ensuredSessionId);
+    setSearchParams(next, { replace: true });
+
     const fileModifications = workbenchStore.getFileModifcations();
     setShowOutOfCredits(false);
     setOverloadMessage(null);
@@ -371,7 +739,7 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
        * manually reset the input and we'd have to manually pass in file attachments. However, those
        * aren't relevant here.
        */
-      append({ role: 'user', content: `${diff}\n\n${_input}` });
+      await append({ role: 'user', content: `${diff}\n\n${_input}` });
 
       /**
        * After sending a new message we reset all modifications since the model
@@ -379,7 +747,7 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
        */
       workbenchStore.resetAllFileModifications();
     } else {
-      append({ role: 'user', content: _input });
+      await append({ role: 'user', content: _input });
     }
 
     setInput('');

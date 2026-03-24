@@ -4,6 +4,8 @@ import { map, type MapStore } from 'nanostores';
 import { Buffer } from 'node:buffer';
 import * as nodePath from 'node:path';
 import { bufferWatchEvents } from '~/utils/buffer';
+import { writeBrainEvent } from '~/lib/brain/events.client';
+import { organismAccessToken, organismProjectId } from '~/lib/stores/organism';
 import { WORK_DIR } from '~/utils/constants';
 import { computeFileModifications } from '~/utils/diff';
 import { createScopedLogger } from '~/utils/logger';
@@ -104,6 +106,23 @@ export class FilesStore {
 
       // we immediately update the file and don't rely on the `change` event coming from the watcher
       this.files.setKey(filePath, { type: 'file', content, isBinary: false });
+
+      const projectId = organismProjectId.get();
+      const accessToken = organismAccessToken.get();
+
+      if (projectId && accessToken) {
+        void writeBrainEvent({
+          accessToken,
+          projectId,
+          type: 'project.files_changed',
+          idempotencyKey: `project.files_changed:${projectId}:${filePath}:${Date.now()}`,
+          payload: {
+            file_paths: [filePath],
+            changed_count: 1,
+            trigger: 'editor_save',
+          },
+        }).catch(() => undefined);
+      }
 
       logger.info('File updated');
     } catch (error) {

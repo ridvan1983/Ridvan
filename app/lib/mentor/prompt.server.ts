@@ -1,6 +1,38 @@
 import { stripIndents } from '~/utils/stripIndent';
 import type { BrainGeoProfile, BrainIndustryProfile, BrainMemoryEntry, BrainProjectState } from '~/lib/brain/types';
 
+type VerticalDriver = {
+  driver: string;
+  why: string;
+  lever: string;
+  impact: 'revenue' | 'cost' | 'risk';
+};
+
+type VerticalPattern = {
+  pattern: string;
+  symptom: string;
+  root_cause: string;
+  fast_fix: string;
+  impact: 'revenue' | 'cost' | 'risk';
+};
+
+type VerticalModule = {
+  module_key: string;
+  label: string;
+  description: string;
+  why_now: string;
+  geo_notes?: string;
+};
+
+type MentorVerticalContext = {
+  expectedBusinessModel: string;
+  revenueDrivers: VerticalDriver[];
+  failurePatterns: VerticalPattern[];
+  modules: VerticalModule[];
+  geoNotes?: string | null;
+  insights?: string[];
+};
+
 function formatEntries(title: string, entries: BrainMemoryEntry[]) {
   if (entries.length === 0) {
     return `${title}: none`;
@@ -12,6 +44,60 @@ function formatEntries(title: string, entries: BrainMemoryEntry[]) {
     .join('\n');
 
   return `${title}:\n${lines}`;
+}
+
+function asObject(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {} as Record<string, unknown>;
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function asString(value: unknown) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function asStringArray(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [] as string[];
+  }
+
+  return value
+    .map((item) => asString(item))
+    .filter((item, index, array) => item.length > 0 && array.indexOf(item) === index);
+}
+
+function formatList(items: string[]) {
+  return items.length > 0 ? items.join(', ') : 'unknown';
+}
+
+function formatTimestampedEntries(title: string, entries: BrainMemoryEntry[]) {
+  if (entries.length === 0) {
+    return `${title}: none`;
+  }
+
+  const lines = entries
+    .slice()
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+    .slice(0, 12)
+    .map((entry) => {
+      const label = entry.title ?? entry.summary ?? entry.entityKey;
+      return `- ${entry.createdAt}: [${entry.kind}] ${label}`;
+    })
+    .join('\n');
+
+  return `${title}:\n${lines}`;
+}
+
+function findProjectAnalysisEntry(entries: BrainMemoryEntry[]) {
+  return entries.find(
+    (entry) =>
+      entry.kind === 'project_analysis' ||
+      entry.entityKey.includes('project_analysis') ||
+      entry.entityKey.includes('project.analyzed') ||
+      (asString(entry.data.businessName) || asString(entry.data.industry) || asString(entry.data.targetAudience)),
+  );
 }
 
 export function buildMentorSystemPrompt(args: {
@@ -29,12 +115,8 @@ export function buildMentorSystemPrompt(args: {
     totalFiles: number;
     sampleFiles: string[];
   } | null;
+  verticalContext?: MentorVerticalContext | null;
 }) {
-  const goals = args.activeEntries.filter((e) => e.kind === 'goal');
-  const priorities = args.activeEntries.filter((e) => e.kind === 'priority');
-  const challenges = args.activeEntries.filter((e) => e.kind === 'challenge');
-  const modules = args.activeEntries.filter((e) => e.kind === 'module');
-
   const industryText = args.industryProfile
     ? `${args.industryProfile.normalizedIndustry}${args.industryProfile.subIndustry ? ` / ${args.industryProfile.subIndustry}` : ''} (confidence ${args.industryProfile.confidence})`
     : 'unknown';
@@ -42,6 +124,51 @@ export function buildMentorSystemPrompt(args: {
   const geoText = args.geoProfile
     ? `${args.geoProfile.countryCode}${args.geoProfile.city ? `, ${args.geoProfile.city}` : ''} (${args.geoProfile.currencyCode ?? 'currency unknown'})`
     : 'unknown';
+
+  const goals = args.activeEntries.filter((e) => e.kind === 'goal');
+  const priorities = args.activeEntries.filter((e) => e.kind === 'priority');
+  const challenges = args.activeEntries.filter((e) => e.kind === 'challenge');
+  const modules = args.activeEntries.filter((e) => e.kind === 'module');
+  const analysisEntry = findProjectAnalysisEntry(args.activeEntries);
+  const analysisData = analysisEntry ? asObject(analysisEntry.data) : {};
+  const analyzedBusinessName = asString(analysisData.businessName) || args.projectTitle || 'unknown';
+  const analyzedIndustry = asString(analysisData.industry) || industryText;
+  const analyzedCity = asString(analysisData.city) || args.geoProfile?.city || 'unknown';
+  const analyzedWhatTheySell = asStringArray(analysisData.whatTheySell);
+  const analyzedPrices = Array.isArray(analysisData.prices)
+    ? analysisData.prices
+        .map((row) => {
+          const objectRow = asObject(row);
+          const item = asString(objectRow.item);
+          const price = asString(objectRow.price);
+          return item && price ? `${item}: ${price}` : '';
+        })
+        .filter(Boolean)
+    : [];
+  const analyzedActiveFeatures = asStringArray(analysisData.activeFeatures);
+  const analyzedMissingFeatures = asStringArray(analysisData.missingFeatures);
+  const analyzedTargetAudience = asString(analysisData.targetAudience);
+  const analyzedTone = asString(analysisData.toneOfVoice);
+  const milestoneEntries = args.activeEntries.filter((e) => e.kind === 'milestone');
+  const sortedEntries = args.activeEntries.slice().sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+  const firstKnownAt = sortedEntries[0]?.createdAt ?? args.latestSnapshotSummary?.createdAt ?? args.state.updatedAt;
+  const lastActivityAt =
+    sortedEntries[sortedEntries.length - 1]?.updatedAt ??
+    args.state.updatedAt ??
+    args.state.latestSnapshotAt ??
+    args.state.latestPublishAt ??
+    args.latestSnapshotSummary?.createdAt ??
+    'unknown';
+  const reachedGoals = goals.filter((entry) => {
+    const status = asString(entry.data.status).toLowerCase();
+    const achieved = entry.data.achieved;
+    return status === 'done' || status === 'completed' || achieved === true;
+  });
+  const priorDecisions = args.activeEntries.filter((entry) => entry.kind !== 'goal' && entry.kind !== 'priority' && entry.kind !== 'challenge');
+  const verticalRevenueDrivers = args.verticalContext?.revenueDrivers ?? [];
+  const verticalFailurePatterns = args.verticalContext?.failurePatterns ?? [];
+  const verticalModules = args.verticalContext?.modules ?? [];
+  const verticalInsights = args.verticalContext?.insights ?? [];
 
   const hasSignals = args.state.currentSignals && Object.keys(args.state.currentSignals).length > 0;
   const hasStateSummaries = Boolean(
@@ -74,18 +201,37 @@ export function buildMentorSystemPrompt(args: {
 
     ROLE ROUTING (invisible — never mention roles to user):
     Automatically blend the right roles based on the question:
-    - CEO/VD: strategy, decisions, prioritization, 90-day plan → "focus", "strategy", "priority", "next step"
-    - CFO: pricing, cashflow, budget, financial analysis → "price", "cost", "revenue", "budget", "money"
-    - CMO: marketing, brand, growth, content, channels → "marketing", "brand", "social media", "growth", "customers"
-    - CTO: tech decisions, security, scalability → "tech", "build", "security", "scale"
-    - Legal: laws, contracts, compliance, GDPR → "legal", "contract", "GDPR", "compliance", "law"
-    - HR: people, culture, recruitment → "hire", "team", "culture", "employee"
-    - Sales Manager: pipeline, sales process, KPIs → "sales", "pipeline", "close", "deal"
-    - Account Executive: pitching, closing, objection handling → "pitch", "investor", "meeting", "objection"
-    - SDR: prospecting, cold outreach, LinkedIn → "prospect", "cold", "LinkedIn", "outreach"
+    - CEO/VD: Always set a concrete 90-day goal based on this industry and current state. Always identify the TOP 3 priorities right now. Never give generic strategy — always make it specific to this exact company in this exact market. Always show what happens if the user does not act. Trigger words → "focus", "strategy", "priority", "next step"
+    - CFO: Always use the company’s real numbers if they exist in Brain. Know industry margins — restaurant: 65-70% food cost, salon: 60% service margin, gym: 40% capex-ratio. Always show consequence analysis with concrete currency amounts when decisions are discussed. Always write ready-to-use budget formulas. Trigger words → "price", "cost", "revenue", "budget", "money"
+    - CMO: Always write finished content — never just tips. Know which channels work for the industry and geo-market. Always write complete Instagram posts, email campaigns, and hashtags adapted to the city. Always give local partnership suggestions with concrete names and addresses when possible. Trigger words → "marketing", "brand", "social media", "growth", "customers"
+    - CTO: Always identify concrete technical risks in the built project. Always check SSL, GDPR, mobile responsiveness, and load time. Always give concrete technical actions with time estimates in minutes or hours. Trigger words → "tech", "build", "security", "scale"
+    - Legal: Always account for local laws for the industry and country. Sweden: GDPR, Visita agreements, F-skatt, PUL. UAE: LLC requirements, VAT 5%. Turkey: KVKK. Always identify concrete compliance risks and the consequence if they are ignored. Always write ready-to-use policy documents when relevant. Trigger words → "legal", "contract", "GDPR", "compliance", "law"
+    - HR: Always account for local salary levels and collective agreements by industry and country. Sweden restaurant: 28 000-32 000 SEK/month + OB. Salon: 26 000-30 000 SEK/month. Always write ready-to-use job ads and concrete recruiting advice for the exact industry. Trigger words → "hire", "team", "culture", "employee"
+    - Sales Manager: Always build a concrete sales pipeline based on the industry. Always identify the 3 fastest paths to new revenue right now. Always write ready-to-use sales scripts and email templates. Trigger words → "sales", "pipeline", "close", "deal"
+    - Account Executive: Always prepare for the 5 most common objections in the industry with ready-to-use replies. Always give a concrete closing strategy based on the customer’s exact situation. Always write ready-to-use offers and proposals. Trigger words → "pitch", "investor", "meeting", "objection"
+    - SDR: Always identify concrete prospects based on industry and city — with names and contact info when possible. Always write ready-to-send cold outreach emails and LinkedIn messages. Trigger words → "prospect", "cold", "LinkedIn", "outreach"
 
     One question can activate multiple roles. Blend naturally. Never announce which role is active.
     Tone adapts: CEO = decisive, CFO = precise/data-driven, CMO = creative, Legal = careful/exact.
+
+    CRITICAL RULE FOR ALL ROLES:
+    - Never give generic advice — always make it specific to this company, this industry, and this city
+    - Always include one concrete action that anchors the end of the response
+    - Always respond in the user’s language
+    - Never end with "Is there anything else I can help you with?" or similar chatbot phrasing
+    - Always end with a concrete question or action tied to this exact business
+
+    CO-FOUNDER RULES — CRITICAL:
+    1. PROACTIVITY: If Brain contains company data, always start with a specific observation about the company — never with a generic greeting.
+    2. FOLLOW-UP: If a goal or action was mentioned in earlier conversations and more than 7 days have passed without follow-up, point it out directly. Example: "You said X days ago that you would [action]. Have you done it?"
+    3. PATTERN RECOGNITION: If the same problem appears multiple times in Brain events, identify and point out the pattern directly.
+    4. CRISIS DETECTION: If there are no bookings or no activity for 7+ days, address it proactively with three concrete suggestions.
+    5. CELEBRATION: When a milestone is reached, celebrate it with specific numbers and comparison against industry averages. Example: "You reached X. It took Y days. The average in your industry is Z days."
+    6. HONESTY: Always tell the truth even when it is uncomfortable. Example: "I need to be honest — [observation]. It is the most common mistake in your industry and it is costing you [concrete consequence]."
+    7. EXIT THINKING: When relevant, surface what the company is worth long-term and what builds enterprise value ahead of a possible exit.
+    8. NETWORK: Always identify local partnership opportunities based on industry and city. Always write ready-to-use collaboration suggestions.
+    9. DECISION SUPPORT: For major decisions, always show a consequence analysis with concrete numbers before the recommendation.
+    10. NEVER A CHATBOT: Mentor is a co-founder who knows the company inside out — not a tool waiting for questions.
 
     LANGUAGE:
     Always respond in the same language the user writes in. Never mix languages.
@@ -383,6 +529,40 @@ export function buildMentorSystemPrompt(args: {
       "confidence": 0.7,
       "assertion_source": "system_inferred"
     }
+
+    PROJEKTKONTEXT:
+    - name: ${analyzedBusinessName}
+    - industry: ${analyzedIndustry}
+    - city: ${analyzedCity}
+    - what_they_sell: ${formatList(analyzedWhatTheySell)}
+    - prices: ${formatList(analyzedPrices)}
+    - active_features: ${formatList(analyzedActiveFeatures)}
+    - missing_features: ${formatList(analyzedMissingFeatures)}
+    - target_audience: ${analyzedTargetAudience || 'unknown'}
+    - tone_of_voice: ${analyzedTone || 'unknown'}
+
+    TIDSKONTEXT:
+    - company_on_platform_since: ${firstKnownAt}
+    - latest_activity: ${lastActivityAt}
+    - latest_snapshot_at: ${args.state.latestSnapshotAt ?? args.latestSnapshotSummary?.createdAt ?? 'unknown'}
+    - latest_publish_at: ${args.state.latestPublishAt ?? 'unknown'}
+    - goals_set: ${goals.length}
+    - goals_reached: ${reachedGoals.length}
+    - previous_conversation_decisions: ${formatList(priorDecisions.map((entry) => entry.title ?? entry.summary ?? entry.entityKey).slice(0, 8))}
+
+    ${formatTimestampedEntries('Brain timeline', args.activeEntries)}
+
+    ${formatTimestampedEntries('Goals with timestamps', goals)}
+
+    ${formatTimestampedEntries('Milestones with timestamps', milestoneEntries)}
+
+    MARKNADSINTELLIGENS (from Vertical):
+    - expected_business_model: ${args.verticalContext?.expectedBusinessModel ?? 'unknown'}
+    - revenue_drivers: ${formatList(verticalRevenueDrivers.map((item) => `${item.driver} — ${item.lever}`))}
+    - local_competition_and_failure_patterns: ${formatList(verticalFailurePatterns.map((item) => `${item.pattern} — ${item.fast_fix}`))}
+    - geo_market_notes: ${args.verticalContext?.geoNotes ?? 'unknown'}
+    - what_works_in_this_market: ${formatList(verticalInsights)}
+    - suggested_modules_for_growth: ${formatList(verticalModules.map((item) => `${item.label} — ${item.description}`))}
 
     Context (Business Brain):
 

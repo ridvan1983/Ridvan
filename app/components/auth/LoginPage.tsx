@@ -18,7 +18,7 @@ export function LoginPage() {
 
   const modeLabel = mode === 'login' ? 'Log in' : 'Sign up';
   const toggleLabel = mode === 'login' ? 'Need an account? Sign up' : 'Already have an account? Log in';
-  const redirectTarget = searchParams.get('redirect') || '/chat';
+  const redirectTarget = searchParams.get('redirect') || '/';
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();

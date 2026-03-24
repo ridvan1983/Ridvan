@@ -4,8 +4,11 @@ import { useAuth } from '~/lib/auth/AuthContext';
 interface CreditsResponse {
   plan: string;
   credits: number;
+  dailyCredits?: number;
   status: string;
 }
+
+export const CREDIT_REFRESH_EVENT = 'ridvan:credits-refresh';
 
 export default function CreditDisplay() {
   const { session } = useAuth();
@@ -38,7 +41,7 @@ export default function CreditDisplay() {
         const payload = (await response.json()) as CreditsResponse;
 
         if (!isDisposed) {
-          setCredits(payload.credits);
+          setCredits((payload.credits ?? 0) + (payload.dailyCredits ?? 0));
           setHasError(false);
         }
       } catch {
@@ -57,12 +60,18 @@ export default function CreditDisplay() {
       fetchCredits();
     };
 
+    const onCreditsRefresh = () => {
+      fetchCredits();
+    };
+
     fetchCredits();
     window.addEventListener('focus', onFocus);
+    window.addEventListener(CREDIT_REFRESH_EVENT, onCreditsRefresh);
 
     return () => {
       isDisposed = true;
       window.removeEventListener('focus', onFocus);
+      window.removeEventListener(CREDIT_REFRESH_EVENT, onCreditsRefresh);
     };
   }, [session?.access_token]);
 

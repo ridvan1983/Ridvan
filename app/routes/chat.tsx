@@ -1,11 +1,18 @@
-import { json, type LoaderFunctionArgs } from '@remix-run/cloudflare';
+import { json, redirect, type LoaderFunctionArgs } from '@remix-run/cloudflare';
 import { ClientOnly } from 'remix-utils/client-only';
 import { AuthGuard } from '~/components/auth/AuthGuard';
 import { BaseChat } from '~/components/chat/BaseChat';
 import { Chat } from '~/components/chat/Chat.client';
 import { Header } from '~/components/header/Header';
 
-export async function loader(_args: LoaderFunctionArgs) {
+export async function loader(args: LoaderFunctionArgs) {
+  const url = new URL(args.request.url);
+  const projectId = url.searchParams.get('projectId');
+
+  if (!projectId?.trim()) {
+    return redirect('/');
+  }
+
   return json({});
 }
 

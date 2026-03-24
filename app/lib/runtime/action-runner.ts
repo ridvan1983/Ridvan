@@ -1,5 +1,9 @@
-import { WebContainer } from '@webcontainer/api';
+import type { WebContainer } from '@webcontainer/api';
 import { map, type MapStore } from 'nanostores';
+import { writeBrainEvent } from '~/lib/brain/events.client';
+import { createSnapshot } from '~/lib/projects/api.client';
+import { collectTextFilesFromWebContainer } from '~/lib/projects/snapshot.client';
+import { organismAccessToken, organismProjectId } from '~/lib/stores/organism';
 import * as nodePath from 'node:path';
 import type { BoltAction } from '~/types/actions';
 import { createScopedLogger } from '~/utils/logger';
@@ -36,11 +40,124 @@ type ActionsMap = MapStore<Record<string, ActionState>>;
 export class ActionRunner {
   #webcontainer: Promise<WebContainer>;
   #currentExecutionPromise: Promise<void> = Promise.resolve();
+  #autoSaveTimer: number | null = null;
+  #autoSaveInFlight: Promise<void> = Promise.resolve();
+  #projectAnalysisTimer: number | null = null;
+  #projectAnalysisInFlight: Promise<void> = Promise.resolve();
 
   actions: ActionsMap = map({});
 
   constructor(webcontainerPromise: Promise<WebContainer>) {
     this.#webcontainer = webcontainerPromise;
+  }
+
+  #scheduleAutoSave() {
+    if (this.#autoSaveTimer !== null) {
+      window.clearTimeout(this.#autoSaveTimer);
+    }
+
+    this.#autoSaveTimer = window.setTimeout(() => {
+      this.#autoSaveTimer = null;
+      this.#autoSaveInFlight = this.#autoSaveInFlight
+        .then(() => this.#persistProjectSnapshot())
+        .catch((error) => {
+          logger.error('Failed to auto-save project snapshot\n\n', error);
+        });
+    }, 750);
+  }
+
+  async #persistProjectSnapshot() {
+    const projectId = organismProjectId.get();
+    const accessToken = organismAccessToken.get();
+
+    if (!projectId || !accessToken) {
+      return;
+    }
+
+    const files = await collectTextFilesFromWebContainer();
+
+    if (Object.keys(files).length === 0) {
+      return;
+    }
+
+    await createSnapshot(accessToken, {
+      projectId,
+      title: null,
+      files,
+    });
+  }
+
+  #isBuildShellAction(action: ActionState) {
+    if (action.type !== 'shell') {
+      return false;
+    }
+
+    const command = action.content.toLowerCase();
+
+    return (
+      command.includes('npm run build') ||
+      command.includes('pnpm build') ||
+      command.includes('pnpm run build') ||
+      command.includes('yarn build') ||
+      command.includes('bun run build') ||
+      command.includes('vite build')
+    );
+  }
+
+  #scheduleProjectAnalysis() {
+    if (this.#projectAnalysisTimer !== null) {
+      window.clearTimeout(this.#projectAnalysisTimer);
+    }
+
+    this.#projectAnalysisTimer = window.setTimeout(() => {
+      this.#projectAnalysisTimer = null;
+      this.#projectAnalysisInFlight = this.#projectAnalysisInFlight
+        .then(() => this.#analyzeBuiltProject())
+        .catch((error) => {
+          logger.error('Failed to analyze built project\n\n', error);
+        });
+    }, 1500);
+  }
+
+  async #analyzeBuiltProject() {
+    const accessToken = organismAccessToken.get();
+    const projectId = organismProjectId.get();
+
+    if (!accessToken || !projectId) {
+      return;
+    }
+
+    const webcontainer = await this.#webcontainer;
+
+    let htmlContent = '';
+
+    try {
+      const rawHtml = await webcontainer.fs.readFile('dist/index.html', 'utf-8');
+      htmlContent = String(rawHtml).trim();
+    } catch {
+      return;
+    }
+
+    if (!htmlContent) {
+      return;
+    }
+
+    const response = await fetch('/api/project-intelligence', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        projectId,
+        htmlContent,
+      }),
+    });
+
+    if (!response.ok) {
+      const json = (await response.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(json?.error || `[RIDVAN-E2024] Project intelligence request failed (${response.status})`);
+    }
   }
 
   addAction(data: ActionCallbackData) {
@@ -147,6 +264,10 @@ export class ActionRunner {
     const exitCode = await process.exit;
 
     logger.debug(`Process terminated with code ${exitCode}`);
+
+    if (exitCode === 0 && this.#isBuildShellAction(action)) {
+      this.#scheduleProjectAnalysis();
+    }
   }
 
   async #runFileAction(action: ActionState) {
@@ -172,6 +293,26 @@ export class ActionRunner {
 
     try {
       await webcontainer.fs.writeFile(action.filePath, action.content);
+
+      const projectId = organismProjectId.get();
+      const accessToken = organismAccessToken.get();
+
+      if (projectId && accessToken) {
+        void writeBrainEvent({
+          accessToken,
+          projectId,
+          type: 'project.files_changed',
+          idempotencyKey: `project.files_changed:${projectId}:${action.filePath}:${Date.now()}`,
+          payload: {
+            file_paths: [action.filePath],
+            changed_count: 1,
+            trigger: 'builder_action',
+          },
+        }).catch(() => undefined);
+      }
+
+      this.#scheduleAutoSave();
+
       logger.debug(`File written ${action.filePath}`);
     } catch (error) {
       logger.error('Failed to write file\n\n', error);

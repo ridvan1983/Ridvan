@@ -41,6 +41,7 @@ export function useChatHistory() {
     }
 
     if (mixedId) {
+      setReady(false);
       getMessages(db, mixedId)
         .then((storedMessages) => {
           if (storedMessages && storedMessages.messages.length > 0) {
@@ -49,20 +50,27 @@ export function useChatHistory() {
             description.set(storedMessages.description);
             chatId.set(storedMessages.id);
           } else {
-            navigate(`/`, { replace: true });
+            // If there is no stored history for this id, treat it as a new chat.
+            // Never bounce users back to landing, since ids can come from shared URLs or server-side project links.
+            setInitialMessages([]);
+            setUrlId(undefined);
+            description.set(undefined);
+            chatId.set(undefined);
           }
 
           setReady(true);
         })
         .catch((error) => {
           toast.error(error.message);
+          setReady(true);
         });
     } else {
       chatId.set(undefined);
       description.set(undefined);
       setUrlId(undefined);
+      setInitialMessages([]);
     }
-  }, []);
+  }, [mixedId, navigate]);
 
   return {
     ready: !mixedId || ready,

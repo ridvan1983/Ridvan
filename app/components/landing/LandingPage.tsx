@@ -1,38 +1,72 @@
 import { useNavigate } from '@remix-run/react';
 import { useState } from 'react';
+import { ClientOnly } from 'remix-utils/client-only';
 import { brand } from '~/config/brand';
-import { examplePrompts } from '~/config/examplePrompts';
-import { SafeImage } from '~/components/ui/SafeImage';
+import { useAuth } from '~/lib/auth/AuthContext';
+import { usePromptEnhancer } from '~/lib/hooks/usePromptEnhancer';
+import { Menu } from '~/components/sidebar/Menu.client';
+import { IconButton } from '~/components/ui/IconButton';
+import { classNames } from '~/utils/classNames';
 
 export function LandingPage() {
   const navigate = useNavigate();
   const [heroPrompt, setHeroPrompt] = useState('');
   const [ctaPrompt, setCtaPrompt] = useState('');
+  const { session } = useAuth();
+  const { enhancingPrompt, promptEnhanced, enhancePrompt, resetEnhancer } = usePromptEnhancer();
+
+  const BRAND_GRADIENT = 'linear-gradient(135deg, #7C3AED, #EC4899)';
+
+  const createClientProjectId = () => {
+    try {
+      if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+      }
+    } catch {
+      // ignore
+    }
+
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (ch) => {
+      const r = Math.floor(Math.random() * 16);
+      const v = ch === 'x' ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
+  };
 
   const goToChatWithPrompt = (prompt: string) => {
     const trimmedPrompt = prompt.trim();
-    const target = trimmedPrompt.length > 0 ? `/chat?prompt=${encodeURIComponent(trimmedPrompt)}` : '/chat';
+    const projectId = createClientProjectId();
+    const target = trimmedPrompt.length > 0
+      ? `/chat?projectId=${encodeURIComponent(projectId)}&prompt=${encodeURIComponent(trimmedPrompt)}`
+      : `/chat?projectId=${encodeURIComponent(projectId)}`;
+
+    if (!session?.access_token) {
+      navigate(`/login?redirect=${encodeURIComponent(target)}`);
+      return;
+    }
+
     navigate(target);
   };
 
   return (
-    <div className="min-h-screen bg-bolt-elements-background-depth-1 text-bolt-elements-textPrimary">
-      <header className="sticky top-0 z-20 border-b border-bolt-elements-borderColor bg-bolt-elements-background-depth-1/90 backdrop-blur">
+    <div className="min-h-screen" style={{ backgroundColor: '#F8F7F4', color: '#0A0A0A' }}>
+      <ClientOnly>{() => <Menu />}</ClientOnly>
+      <header className="sticky top-0 z-20 border-b backdrop-blur" style={{ borderColor: '#E8E6E1', backgroundColor: 'rgba(248, 247, 244, 0.9)' }}>
         <div className="mx-auto max-w-7xl px-6 py-4 flex items-center justify-between">
-          <a href="/" className="text-xl font-semibold">
+          <a href="/" className="text-xl font-semibold" style={{ color: '#0A0A0A' }}>
             {brand.appName}
           </a>
           <nav className="flex items-center gap-3 text-sm">
-            <a href="/pricing" className="text-bolt-elements-textSecondary hover:text-bolt-elements-textPrimary">
+            <a href="/pricing" className="hover:opacity-80" style={{ color: '#6B6B6B' }}>
               Pricing
             </a>
-            <a href="/login" className="text-bolt-elements-textSecondary hover:text-bolt-elements-textPrimary">
+            <a href="/login" className="hover:opacity-80" style={{ color: '#6B6B6B' }}>
               Log in
             </a>
             <a
               href="/login"
               className="rounded-lg px-4 py-2 text-white font-medium"
-              style={{ backgroundImage: `linear-gradient(90deg, ${brand.gradient.from}, ${brand.gradient.to})` }}
+              style={{ backgroundImage: BRAND_GRADIENT }}
             >
               Get Started
             </a>
@@ -41,137 +75,169 @@ export function LandingPage() {
       </header>
 
       <main>
-        <section className="mx-auto max-w-7xl px-6 pt-20 pb-16">
+        <section className="mx-auto max-w-7xl px-6 pt-14 pb-12">
           <div className="max-w-4xl">
-            <h1 className="text-4xl sm:text-6xl leading-tight font-bold">Your idea. Our AI. Your app.</h1>
-            <p className="mt-5 text-lg text-bolt-elements-textSecondary max-w-3xl">
+            <div
+              className="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium"
+              style={{ backgroundColor: 'rgba(124, 58, 237, 0.10)', color: '#0A0A0A' }}
+            >
+              Build in minutes with AI
+            </div>
+
+            <h1 className="mt-5 text-4xl sm:text-6xl leading-tight font-bold" style={{ color: '#0A0A0A' }}>
+              Your idea.{' '}
+              <span
+                style={{
+                  backgroundImage: BRAND_GRADIENT,
+                  WebkitBackgroundClip: 'text',
+                  backgroundClip: 'text',
+                  color: 'transparent',
+                }}
+              >
+                Our AI
+              </span>
+              . Your{' '}
+              <span
+                style={{
+                  backgroundImage: BRAND_GRADIENT,
+                  WebkitBackgroundClip: 'text',
+                  backgroundClip: 'text',
+                  color: 'transparent',
+                }}
+              >
+                app
+              </span>
+              .
+            </h1>
+            <p className="mt-5 text-lg max-w-3xl" style={{ color: '#6B6B6B' }}>
               Describe what you want to build. Ridvan turns it into a working app in seconds.
             </p>
-          </div>
 
-          <div className="mt-8 max-w-4xl overflow-hidden rounded-2xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-2">
-            <SafeImage
-              alt="Landing hero"
-              className="h-56 w-full object-cover"
-            />
-          </div>
-
-          <div className="mt-8 max-w-4xl rounded-2xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 p-4">
-            <textarea
-              rows={3}
-              value={heroPrompt}
-              onChange={(event) => setHeroPrompt(event.target.value)}
-              placeholder="Describe your app idea..."
-              className="w-full resize-none rounded-lg bg-bolt-elements-background-depth-1 p-4 text-base focus:outline-none"
-            />
-            <div className="mt-3 flex justify-end">
-              <button
-                onClick={() => goToChatWithPrompt(heroPrompt)}
-                className="rounded-lg px-5 py-2.5 text-sm font-semibold text-white"
-                style={{ backgroundImage: `linear-gradient(90deg, ${brand.gradient.from}, ${brand.gradient.to})` }}
-              >
-                Start building →
-              </button>
-            </div>
-          </div>
-
-          <div className="mt-5 flex flex-wrap gap-2 max-w-4xl">
-            {examplePrompts.map((item) => (
-              <button
-                key={item.label}
-                onClick={() => setHeroPrompt(item.prompt)}
-                className="rounded-full border border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 px-3 py-1.5 text-sm text-bolt-elements-textSecondary hover:text-bolt-elements-textPrimary"
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="mx-auto max-w-7xl px-6 py-14">
-          <div className="grid gap-4 md:grid-cols-3">
-            <div className="rounded-xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 p-6">
-              <h3 className="text-lg font-semibold">AI-Powered</h3>
-              <p className="mt-2 text-sm text-bolt-elements-textSecondary">
-                Describe your idea in plain language and watch it come to life.
-              </p>
-            </div>
-            <div className="rounded-xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 p-6">
-              <h3 className="text-lg font-semibold">Instant Preview</h3>
-              <p className="mt-2 text-sm text-bolt-elements-textSecondary">
-                See your app running in real-time as it's being built.
-              </p>
-            </div>
-            <div className="rounded-xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 p-6">
-              <h3 className="text-lg font-semibold">Production Ready</h3>
-              <p className="mt-2 text-sm text-bolt-elements-textSecondary">
-                Export clean, deployable code. No vendor lock-in.
-              </p>
-            </div>
-          </div>
-        </section>
-
-        <section className="mx-auto max-w-7xl px-6 py-14">
-          <div className="rounded-2xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 p-8">
-            <h2 className="text-2xl font-semibold">Trusted by builders</h2>
-            <div className="mt-6 grid gap-4 sm:grid-cols-3">
-              <div>
-                <div className="text-3xl font-bold">1,000+</div>
-                <div className="text-sm text-bolt-elements-textSecondary">apps built</div>
-              </div>
-              <div>
-                <div className="text-3xl font-bold">500+</div>
-                <div className="text-sm text-bolt-elements-textSecondary">builders</div>
-              </div>
-              <div>
-                <div className="text-3xl font-bold">95%</div>
-                <div className="text-sm text-bolt-elements-textSecondary">success rate</div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="mx-auto max-w-7xl px-6 py-16">
-          <div className="rounded-2xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 p-8">
-            <h2 className="text-3xl font-bold">Ready to build?</h2>
-            <p className="mt-2 text-bolt-elements-textSecondary">Start for free — no credit card required</p>
-
-            <div className="mt-6">
+            <div className="mt-7 rounded-2xl border p-4" style={{ backgroundColor: '#FFFFFF', borderColor: '#E8E6E1' }}>
               <textarea
-                rows={2}
-                value={ctaPrompt}
-                onChange={(event) => setCtaPrompt(event.target.value)}
+                rows={3}
+                value={heroPrompt}
+                onChange={(event) => {
+                  setHeroPrompt(event.target.value);
+                  resetEnhancer();
+                }}
                 placeholder="Describe your app idea..."
-                className="w-full resize-none rounded-lg bg-bolt-elements-background-depth-1 p-4 text-base focus:outline-none"
+                className="w-full resize-none rounded-lg p-4 text-base focus:outline-none"
+                style={{ backgroundColor: '#FFFFFF', color: '#0A0A0A' }}
               />
-              <div className="mt-3 flex justify-end">
+              <div className="mt-3 flex items-center justify-between">
+                <div className="flex items-center">
+                  <IconButton
+                    title="Enhance prompt"
+                    disabled={enhancingPrompt || heroPrompt.trim().length === 0}
+                    className={classNames(
+                      'border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 text-bolt-elements-textSecondary enabled:hover:text-bolt-elements-textPrimary enabled:hover:bg-bolt-elements-item-backgroundActive rounded-lg px-2 py-1',
+                      {
+                        'opacity-100!': enhancingPrompt,
+                        'text-bolt-elements-item-contentAccent! pr-1.5 enabled:hover:bg-bolt-elements-item-backgroundAccent!':
+                          promptEnhanced,
+                      },
+                    )}
+                    onClick={() => {
+                      if (!session?.access_token) {
+                        const trimmedPrompt = heroPrompt.trim();
+                        const projectId = createClientProjectId();
+                        const redirectTarget = trimmedPrompt.length > 0
+                          ? `/chat?projectId=${encodeURIComponent(projectId)}&prompt=${encodeURIComponent(trimmedPrompt)}`
+                          : `/chat?projectId=${encodeURIComponent(projectId)}`;
+                        navigate(`/login?redirect=${encodeURIComponent(redirectTarget)}`);
+                        return;
+                      }
+
+                      enhancePrompt(heroPrompt, setHeroPrompt, session.access_token);
+                    }}
+                  >
+                    {enhancingPrompt ? (
+                      <>
+                        <div className="i-svg-spinners:90-ring-with-bg text-bolt-elements-loader-progress text-xl"></div>
+                        <div className="ml-1.5">Enhancing prompt...</div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="i-ph:sparkle text-xl"></div>
+                        <div className="ml-1.5">{promptEnhanced ? 'Prompt enhanced' : session?.access_token ? 'AI Enhance' : 'Log in to Enhance'}</div>
+                      </>
+                    )}
+                  </IconButton>
+                </div>
                 <button
-                  onClick={() => goToChatWithPrompt(ctaPrompt)}
+                  onClick={() => goToChatWithPrompt(heroPrompt)}
                   className="rounded-lg px-5 py-2.5 text-sm font-semibold text-white"
-                  style={{ backgroundImage: `linear-gradient(90deg, ${brand.gradient.from}, ${brand.gradient.to})` }}
+                  style={{ backgroundImage: BRAND_GRADIENT }}
                 >
                   Start building →
                 </button>
               </div>
             </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              {['E-handel', 'Bokningssystem', 'Dashboard', 'CRM', 'Portfolio'].map((label) => (
+                <button
+                  key={label}
+                  onClick={() => setHeroPrompt(label)}
+                  className="rounded-full border px-3 py-1.5 text-sm hover:opacity-80"
+                  style={{ borderColor: '#E8E6E1', backgroundColor: '#FFFFFF', color: '#6B6B6B' }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-10 grid gap-4 max-w-4xl md:grid-cols-3">
+            {[{ title: 'Builder', desc: 'Turns your idea into a working app automatically.' }, { title: 'Mentor', desc: 'Guides you through product decisions and best practices.' }, { title: 'Vertical', desc: 'Adapts output to your industry with tailored UI and content.' }].map(
+              (card) => (
+                <div
+                  key={card.title}
+                  className="rounded-xl border p-6"
+                  style={{ backgroundColor: '#FFFFFF', borderColor: '#E8E6E1', borderLeftWidth: 4, borderLeftStyle: 'solid', borderLeftColor: 'transparent' }}
+                >
+                  <div style={{ position: 'relative' }}>
+                    <div
+                      style={{
+                        position: 'absolute',
+                        left: -4,
+                        top: 0,
+                        bottom: 0,
+                        width: 4,
+                        backgroundImage: BRAND_GRADIENT,
+                        borderTopLeftRadius: 12,
+                        borderBottomLeftRadius: 12,
+                      }}
+                    />
+                    <h3 className="text-lg font-semibold" style={{ color: '#0A0A0A' }}>
+                      {card.title}
+                    </h3>
+                    <p className="mt-2 text-sm" style={{ color: '#6B6B6B' }}>
+                      {card.desc}
+                    </p>
+                  </div>
+                </div>
+              ),
+            )}
           </div>
         </section>
       </main>
 
-      <footer className="border-t border-bolt-elements-borderColor">
-        <div className="mx-auto max-w-7xl px-6 py-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between text-sm text-bolt-elements-textSecondary">
+      <footer className="border-t" style={{ borderColor: '#E8E6E1' }}>
+        <div className="mx-auto max-w-7xl px-6 py-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between text-sm" style={{ color: '#6B6B6B' }}>
           <div>{brand.appName} © 2026</div>
           <div className="flex gap-4">
-            <a href="/pricing" className="hover:text-bolt-elements-textPrimary">
+            <a href="/pricing" className="hover:opacity-80" style={{ color: '#6B6B6B' }}>
               Pricing
             </a>
-            <a href="/login" className="hover:text-bolt-elements-textPrimary">
+            <a href="/login" className="hover:opacity-80" style={{ color: '#6B6B6B' }}>
               Login
             </a>
-            <a href="#" className="hover:text-bolt-elements-textPrimary">
+            <a href="#" className="hover:opacity-80" style={{ color: '#6B6B6B' }}>
               Terms
             </a>
-            <a href="#" className="hover:text-bolt-elements-textPrimary">
+            <a href="#" className="hover:opacity-80" style={{ color: '#6B6B6B' }}>
               Privacy
             </a>
           </div>

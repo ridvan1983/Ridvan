@@ -1,5 +1,7 @@
 import { useStore } from '@nanostores/react';
+import { useEffect } from 'react';
 import { ClientOnly } from 'remix-utils/client-only';
+import { useLocation } from '@remix-run/react';
 import { chatStore } from '~/lib/stores/chat';
 import { classNames } from '~/utils/classNames';
 import { HeaderActionButtons } from './HeaderActionButtons.client';
@@ -7,9 +9,40 @@ import { ChatDescription } from '~/lib/persistence/ChatDescription.client';
 import { brand } from '~/config/brand';
 import CreditDisplay from '~/components/credits/CreditDisplay';
 import { SafeImage } from '~/components/ui/SafeImage';
+import { organismProjectId } from '~/lib/stores/organism';
+import { hydrateMentorUnread, isMentorUnread, mentorUnreadByProject } from '~/lib/stores/mentor-unread';
+import { useAuth } from '~/lib/auth/AuthContext';
+import { readMentorUnread } from '~/lib/mentor/api.client';
 
 export function Header() {
   const chat = useStore(chatStore);
+  const location = useLocation();
+  const isWorkspace = location.pathname.startsWith('/chat/');
+  const projectId = useStore(organismProjectId);
+  const { session } = useAuth();
+  const accessToken = session?.access_token ?? null;
+  useStore(mentorUnreadByProject);
+  const showUnread = isMentorUnread(projectId);
+
+  // Client-only hydration for the unread map.
+  // (No server dependency; safe to call in browser.)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    hydrateMentorUnread();
+
+    if (!accessToken) {
+      return;
+    }
+
+    readMentorUnread(accessToken)
+      .then((res) => {
+        const current = mentorUnreadByProject.get();
+        mentorUnreadByProject.set({ ...current, ...(res.unreadByProject ?? {}) });
+      })
+      .catch(() => {
+        // ignore
+      });
+  }, [accessToken]);
 
   return (
     <header
@@ -32,13 +65,32 @@ export function Header() {
           {brand.appName}
         </a>
       </div>
+
+      <nav className="ml-6 flex items-center gap-4 text-sm text-bolt-elements-textSecondary">
+        <a href="/chat?openMenu=1" className="hover:text-bolt-elements-textPrimary">
+          Mina projekt
+        </a>
+        <a href="/mentor" className="hover:text-bolt-elements-textPrimary inline-flex items-center gap-2">
+          Mentor
+          <ClientOnly>
+            {() => (showUnread ? <span className="h-2 w-2 rounded-full bg-bolt-elements-item-contentAccent" /> : null)}
+          </ClientOnly>
+        </a>
+      </nav>
+
       <span className="flex-1 px-4 truncate text-center text-bolt-elements-textPrimary">
-        <ClientOnly>{() => <ChatDescription />}</ClientOnly>
+        {isWorkspace ? <ClientOnly>{() => <ChatDescription />}</ClientOnly> : null}
       </span>
+
       <div className="mr-2">
         <CreditDisplay />
       </div>
-      {chat.started && (
+
+      <a href="/profile" className="mr-2 text-sm text-bolt-elements-textSecondary hover:text-bolt-elements-textPrimary">
+        Profil
+      </a>
+
+      {isWorkspace && chat.started && (
         <ClientOnly>
           {() => (
             <div className="mr-1">
