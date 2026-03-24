@@ -15,7 +15,7 @@ Traditional AI assistants like Claude, v0, etc are incredible — but you can't 
 
 - **AI with Complete Environment Control**: Unlike traditional dev environments where the AI can only assist in code generation, Ridvan gives AI models complete control over the entire environment including the filesystem, node server, package manager, terminal, and browser console. This empowers AI agents to handle the entire app lifecycle — from creation to deployment.
 
-- **Mentor — Your AI Co-Founder**: Ridvan includes a built-in AI co-founder that knows your business, remembers your goals, and gives you McKinsey-level advice. No other platform offers this.
+- **Mentor — Your AI Co-Founder**: Ridvan includes a built-in AI co-founder that knows your business, remembers your goals, and gives you expert-level advice. No other platform offers this.
 
 - **Vertical Intelligence**: Ridvan understands your industry and builds exactly what your business needs to make money — not just a generic website.
 

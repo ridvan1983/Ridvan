@@ -2,8 +2,7 @@
 
 ## MIT License
 
-Copyright (c) 2024 StackBlitz, Inc.  
-Ridvan modifications (c) 2024 Ridvan Platform
+Copyright (c) 2024 Ridvan Platform
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -25,9 +24,8 @@ SOFTWARE.
 
 ## Attribution Notice
 
-Ridvan is built upon the excellent bolt.new open-source codebase from StackBlitz.
-The core WebContainer technology and AI integration infrastructure remains
-the property of StackBlitz, Inc. and is used under the terms of the MIT License.
+Ridvan is distributed under the MIT License for this repository.
+Project-specific branding, product language, and platform experience are presented as Ridvan.
 
 ## Third-Party Licenses
 

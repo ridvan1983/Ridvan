@@ -1,5 +1,5 @@
 // Ridvan Branding Configuration
-// Built on top of bolt.new core - respecting MIT license
+// Built for Ridvan Platform under the repository license terms
 
 export const RIDVAN_BRANDING = {
   // Core identity
