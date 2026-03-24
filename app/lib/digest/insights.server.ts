@@ -1,22 +1,21 @@
+import { generateText } from 'ai';
+import { createAnthropic } from '@ai-sdk/anthropic';
+import { getAPIKey } from '~/lib/.server/llm/api-key';
 import { readBrainContext } from '~/lib/brain/read.server';
 import { getVerticalContext } from '~/lib/vertical/context.server';
 import { buildOpportunityContext } from '~/lib/opportunity/context.server';
 import { supabaseAdmin } from '~/lib/supabase/server';
 
-export type DigestInsight = {
-  title: string;
-  why_now: string;
-  next_action: string;
-  impact: 'increase_revenue' | 'reduce_costs' | 'reduce_risk';
-};
-
 export type WeeklyDigest = {
   lang: 'sv' | 'tr' | 'en';
   subject: string;
-  happened: string;
-  keyInsight: { title: string; whyNow: string };
-  action: string;
-  healthLine: string;
+  weekLabel: string;
+  businessName: string;
+  statusLine: string;
+  whatWorked: string;
+  whatDidNotWork: string;
+  oneThingThisWeek: string;
+  cofounderSays: string;
 };
 
 function pickLanguage(languageCodes: string[]) {
@@ -26,29 +25,24 @@ function pickLanguage(languageCodes: string[]) {
   return 'en';
 }
 
-function passesFilter(i: DigestInsight) {
-  const hasCompanySpecific = i.title.length > 0;
-  const hasAction = i.next_action.trim().length > 10;
-  const hasWhyNow = i.why_now.trim().length > 10;
-  return hasCompanySpecific && hasAction && hasWhyNow;
+function asObject(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {} as Record<string, unknown>;
+  }
+
+  return value as Record<string, unknown>;
 }
 
-function subjectFor(args: { lang: WeeklyDigest['lang']; firstName: string; key: string }) {
-  if (args.lang === 'sv') {
-    return `Din vecka, ${args.firstName}: ${args.key}`;
-  }
-  if (args.lang === 'tr') {
-    return `Haftan, ${args.firstName}: ${args.key}`;
-  }
-  return `Your week, ${args.firstName}: ${args.key}`;
+function asString(value: unknown) {
+  return typeof value === 'string' ? value.trim() : '';
 }
 
-function clampWords(text: string, maxWords: number) {
-  const words = text.trim().split(/\s+/g);
-  if (words.length <= maxWords) {
-    return text.trim();
+function asStringArray(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [] as string[];
   }
-  return words.slice(0, maxWords).join(' ').trim();
+
+  return value.map((item) => asString(item)).filter(Boolean);
 }
 
 function startOfLastWeekUtc(now = new Date()) {
@@ -58,18 +52,79 @@ function startOfLastWeekUtc(now = new Date()) {
   return d;
 }
 
-function computeHealthLine(args: { lang: WeeklyDigest['lang']; statuses: Array<'green' | 'yellow' | 'red'> }) {
-  const worst = args.statuses.includes('red') ? 'red' : args.statuses.includes('yellow') ? 'yellow' : args.statuses.includes('green') ? 'green' : 'yellow';
-  if (args.lang === 'sv') {
-    return worst === 'green' ? 'Bolaget mår: 🟢 Bra' : worst === 'red' ? 'Bolaget mår: 🔴 Kräver uppmärksamhet' : 'Bolaget mår: 🟡 Okej';
-  }
-  if (args.lang === 'tr') {
-    return worst === 'green' ? 'Şirket durumu: 🟢 İyi' : worst === 'red' ? 'Şirket durumu: 🔴 Dikkat gerekiyor' : 'Şirket durumu: 🟡 İdare eder';
-  }
-  return worst === 'green' ? 'Company health: 🟢 Good' : worst === 'red' ? 'Company health: 🔴 Needs attention' : 'Company health: 🟡 Okay';
+function isoWeekLabel(date = new Date()) {
+  const utc = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const day = utc.getUTCDay() || 7;
+  utc.setUTCDate(utc.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
+  const week = Math.ceil((((utc.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return String(week);
 }
 
-export async function buildWeeklyDigestInsights(args: { projectId: string; userId: string }) {
+function extractProjectAnalysis(activeEntries: Array<{ data: Record<string, unknown>; kind: string; entityKey: string }>) {
+  const entry = activeEntries.find(
+    (item) =>
+      item.kind === 'project_analysis' ||
+      item.entityKey.includes('project_analysis') ||
+      item.entityKey.includes('project.analyzed') ||
+      Boolean(asString(item.data.businessName) || asString(item.data.targetAudience)),
+  );
+
+  const data = entry ? asObject(entry.data) : {};
+  return {
+    businessName: asString(data.businessName),
+    whatTheySell: asStringArray(data.whatTheySell),
+    activeFeatures: asStringArray(data.activeFeatures),
+    missingFeatures: asStringArray(data.missingFeatures),
+    targetAudience: asString(data.targetAudience),
+    toneOfVoice: asString(data.toneOfVoice),
+    revenueOpportunities: asStringArray(data.revenueOpportunities),
+  };
+}
+
+function extractJsonObject(raw: string) {
+  const trimmed = raw.trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
+  const start = trimmed.indexOf('{');
+  const end = trimmed.lastIndexOf('}');
+
+  if (start === -1 || end === -1 || end <= start) {
+    throw new Error('[RIDVAN-E1121] Digest model response did not contain valid JSON');
+  }
+
+  return trimmed.slice(start, end + 1);
+}
+
+function normalizeDigest(lang: WeeklyDigest['lang'], value: unknown, fallbackBusinessName: string): WeeklyDigest {
+  const source = asObject(value);
+  const businessName = asString(source.businessName) || fallbackBusinessName || 'Ridvan project';
+  const weekLabel = asString(source.weekLabel) || isoWeekLabel();
+  const statusLine = asString(source.statusLine);
+  const whatWorked = asString(source.whatWorked);
+  const whatDidNotWork = asString(source.whatDidNotWork);
+  const oneThingThisWeek = asString(source.oneThingThisWeek);
+  const cofounderSays = asString(source.cofounderSays);
+  const subject =
+    asString(source.subject) ||
+    (lang === 'sv'
+      ? `Vecka ${weekLabel} — ${businessName} — din co-founder rapporterar`
+      : lang === 'tr'
+        ? `Hafta ${weekLabel} — ${businessName} — kurucu ortağın rapor ediyor`
+        : `Week ${weekLabel} — ${businessName} — your co-founder reports`);
+
+  return {
+    lang,
+    subject,
+    weekLabel,
+    businessName,
+    statusLine,
+    whatWorked,
+    whatDidNotWork,
+    oneThingThisWeek,
+    cofounderSays,
+  };
+}
+
+export async function buildWeeklyDigestInsights(args: { projectId: string; userId: string; env?: Env }) {
   const brain = await readBrainContext({ projectId: args.projectId, userId: args.userId });
   if (!brain) return null;
 
@@ -79,89 +134,7 @@ export async function buildWeeklyDigestInsights(args: { projectId: string; userI
   const geoLangs = brain.geoProfile?.languageCodes ?? [];
   const lang = pickLanguage(geoLangs) as WeeklyDigest['lang'];
   const industry = brain.industryProfile?.normalizedIndustry ?? (vertical as any)?.industryProfile?.normalizedIndustry ?? 'unknown';
-
-  const insights: DigestInsight[] = [];
-
-  // Insight 1: top opportunity
-  const topOpp = (opportunity?.opportunities ?? [])[0] as any;
-  if (topOpp) {
-    const impact: DigestInsight['impact'] = topOpp?.type === 'risk' ? 'reduce_risk' : topOpp?.type === 'growth' ? 'increase_revenue' : 'increase_revenue';
-    insights.push({
-      title:
-        lang === 'sv'
-          ? 'Snabbaste vinsten just nu'
-          : lang === 'tr'
-            ? 'Şu an en hızlı kazanım'
-            : 'Fastest win right now',
-      why_now:
-        typeof topOpp?.why_now === 'string'
-          ? topOpp.why_now
-          : lang === 'sv'
-            ? 'Det här påverkar konvertering/intäkt direkt den här veckan.'
-            : lang === 'tr'
-              ? 'Bu hafta dönüşümü ve geliri doğrudan etkiler.'
-              : 'This directly affects conversion and revenue this week.',
-      next_action:
-        typeof topOpp?.reasoning === 'string'
-          ? topOpp.reasoning
-          : lang === 'sv'
-            ? 'Välj en modul eller åtgärd som tar bort friktion i huvudflödet.'
-            : lang === 'tr'
-              ? 'Ana akıştaki sürtünmeyi azaltan tek bir aksiyon seç.'
-              : 'Pick one action that removes friction in the primary flow.',
-      impact,
-    });
-  }
-
-  // Insight 2: signals sanity
-  const published = brain.state.publishedStatus;
-  if (published !== 'published') {
-    insights.push({
-      title: lang === 'sv' ? 'Säkerställ att du verkligen är live' : lang === 'tr' ? 'Gerçekten yayında mısın?' : 'Make sure you are actually live',
-      why_now:
-        lang === 'sv'
-          ? 'Utan en stabil live-version kan du inte lita på trafik- eller bokningsdata.'
-          : lang === 'tr'
-            ? 'Stabil bir canlı sürüm olmadan trafik ve rezervasyon verisine güvenemezsin.'
-            : 'Without a stable live version, you can’t trust traffic or conversion signals.',
-      next_action:
-        lang === 'sv'
-          ? 'Öppna preview och testa: (1) primär CTA fungerar, (2) kontaktflöde fungerar, (3) mobilvy ser bra ut.'
-          : lang === 'tr'
-            ? 'Preview’de test et: (1) ana CTA çalışıyor, (2) iletişim akışı çalışıyor, (3) mobil görünüm iyi.'
-            : 'Test in preview: (1) primary CTA works, (2) contact flow works, (3) mobile view looks good.',
-      impact: 'reduce_risk',
-    });
-  }
-
-  // Insight 3: vertical driver reminder
-  const driver = (vertical as any)?.revenueDrivers?.[0];
-  if (driver && typeof driver === 'object') {
-    insights.push({
-      title: lang === 'sv' ? 'Fokusera på den största intäktsdrivaren' : lang === 'tr' ? 'En büyük gelir kaldıraçına odaklan' : 'Focus on the biggest revenue driver',
-      why_now:
-        lang === 'sv'
-          ? 'Små förbättringar i rätt del av flödet ger effekt direkt.'
-          : lang === 'tr'
-            ? 'Doğru noktadaki küçük iyileştirmeler hızlı sonuç verir.'
-            : 'Small improvements in the right part of the flow compound quickly.',
-      next_action:
-        typeof (driver as any)?.lever === 'string'
-          ? String((driver as any).lever)
-          : lang === 'sv'
-            ? 'Gör primär handling extremt tydlig på första skärmen.'
-            : lang === 'tr'
-              ? 'İlk ekranda ana aksiyonu çok net yap.'
-              : 'Make the primary action obvious on the first screen.',
-      impact: 'increase_revenue',
-    });
-  }
-
-  const filtered = insights.filter(passesFilter);
-  const top = filtered[0] ?? null;
-  if (!top) {
-    return null;
-  }
+  const analysis = extractProjectAnalysis(brain.activeEntries);
 
   const since = startOfLastWeekUtc();
 
@@ -194,46 +167,117 @@ export async function buildWeeklyDigestInsights(args: { projectId: string; userI
       .limit(50),
   ]);
 
-  const builderCount = (events ?? []).filter((e: any) => e?.source === 'builder').length;
-  const mentorCount = (events ?? []).filter((e: any) => e?.source === 'mentor').length;
+  const builderEvents = (events ?? []).filter((event: any) => event?.source === 'builder');
+  const mentorEvents = (events ?? []).filter((event: any) => event?.source === 'mentor');
+  const publishEvents = (events ?? []).filter((event: any) => event?.type === 'project.published');
+  const analyzedEvents = (events ?? []).filter((event: any) => event?.type === 'project.analyzed');
+  const changedEvents = (events ?? []).filter((event: any) => event?.type === 'project.files_changed');
   const milestoneTitles = (milestoneRows ?? []).map((m: any) => (typeof m?.title === 'string' ? m.title : null)).filter(Boolean) as string[];
-
-  const happened =
-    lang === 'sv'
-      ? clampWords(
-          `Förra veckan: ${builderCount > 0 ? `${builderCount} bygg-händelser` : 'inga bygg-händelser'}, ${mentorCount > 0 ? `${mentorCount} Mentor-händelser` : 'ingen Mentor-aktivitet'}${milestoneTitles.length > 0 ? `, milstolpar: ${milestoneTitles.slice(0, 2).join(' + ')}` : ''}.`,
-          55,
-        )
-      : lang === 'tr'
-        ? clampWords(
-            `Geçen hafta: ${builderCount > 0 ? `${builderCount} build olayı` : 'build yok'}, ${mentorCount > 0 ? `${mentorCount} Mentor olayı` : 'Mentor aktivitesi yok'}${milestoneTitles.length > 0 ? `, kilometre taşları: ${milestoneTitles.slice(0, 2).join(' + ')}` : ''}.`,
-            55,
-          )
-        : clampWords(
-            `Last week: ${builderCount > 0 ? `${builderCount} build events` : 'no build events'}, ${mentorCount > 0 ? `${mentorCount} Mentor events` : 'no Mentor activity'}${milestoneTitles.length > 0 ? `, milestones: ${milestoneTitles.slice(0, 2).join(' + ')}` : ''}.`,
-            55,
-          );
-
   const healthStatuses = Array.from(
     new Set((healthRows ?? []).map((r: any) => (r?.status === 'green' || r?.status === 'yellow' || r?.status === 'red' ? r.status : null)).filter(Boolean)),
   ) as Array<'green' | 'yellow' | 'red'>;
 
-  const healthLine = computeHealthLine({ lang, statuses: healthStatuses });
+  const businessName = analysis.businessName || analysis.whatTheySell[0] || 'Ridvan project';
+  const weekLabel = isoWeekLabel();
+  const apiKey = getAPIKey(args.env ?? ((globalThis as any)?.env ?? undefined));
 
-  const key = lang === 'sv' ? top.title : lang === 'tr' ? top.title : top.title;
-  const subject = subjectFor({ lang, firstName: 'du', key });
+  if (!apiKey) {
+    return {
+      lang,
+      subject:
+        lang === 'sv'
+          ? `Vecka ${weekLabel} — ${businessName} — din co-founder rapporterar`
+          : lang === 'tr'
+            ? `Hafta ${weekLabel} — ${businessName} — kurucu ortağın rapor ediyor`
+            : `Week ${weekLabel} — ${businessName} — your co-founder reports`,
+      weekLabel,
+      businessName,
+      statusLine:
+        lang === 'sv'
+          ? `Den här veckan såg vi ${builderEvents.length} byggaktiviteter, ${mentorEvents.length} Mentor-interaktioner och ${publishEvents.length} publiceringar.`
+          : lang === 'tr'
+            ? `Bu hafta ${builderEvents.length} build aktivitesi, ${mentorEvents.length} Mentor etkileşimi ve ${publishEvents.length} yayın gördük.`
+            : `This week we saw ${builderEvents.length} build activities, ${mentorEvents.length} Mentor interactions, and ${publishEvents.length} publish events.`,
+      whatWorked: milestoneTitles[0] || analysis.activeFeatures[0] || analysis.revenueOpportunities[0] || 'Momentum increased in a concrete part of the business.',
+      whatDidNotWork:
+        analysis.missingFeatures[0] ||
+        (healthStatuses.includes('red')
+          ? 'A critical risk signal remained unresolved.'
+          : 'The company still has one unresolved bottleneck holding back growth.'),
+      oneThingThisWeek: (opportunity?.opportunities?.[0] as any)?.reasoning ?? analysis.revenueOpportunities[0] ?? 'Remove the single biggest friction point in the main conversion flow.',
+      cofounderSays:
+        lang === 'sv'
+          ? 'Du har momentum, men bara om du använder veckan till att stänga den tydligaste luckan i flödet. Jag skulle fokusera på en sak som påverkar omsättning direkt och mäta resultatet samma vecka.'
+          : lang === 'tr'
+            ? 'Momentumu var ama bu hafta en net darboğazı kapatırsan gerçek etki görürsün. Ben doğrudan geliri etkileyen tek bir hamleye odaklanır ve sonucu aynı hafta ölçerdim.'
+            : 'You have momentum, but only if you use this week to close the clearest gap in the flow. I would focus on the one move that affects revenue directly and measure the result this week.',
+    };
+  }
 
-  const action = clampWords(top.next_action, 55);
-  const whyNow = clampWords(top.why_now, 55);
+  const anthropic = createAnthropic({ apiKey });
+  const prompt = `Create a weekly co-founder email digest for exactly one company.
+Return ONLY valid JSON with this shape:
+{
+  "subject": string,
+  "weekLabel": string,
+  "businessName": string,
+  "statusLine": string,
+  "whatWorked": string,
+  "whatDidNotWork": string,
+  "oneThingThisWeek": string,
+  "cofounderSays": string
+}
 
-  const digest: WeeklyDigest = {
-    lang,
-    subject,
-    happened,
-    keyInsight: { title: top.title, whyNow },
-    action,
-    healthLine,
-  };
+Rules:
+- Never be generic.
+- Write in the target language only: ${lang}.
+- Subject should follow this structure in the target language: Week/Vecka/Hafta [X] — [BusinessName] — your co-founder reports.
+- LÄGET/statusLine must be one sentence.
+- VAD SOM FUNKADE/whatWorked must be specific to positive activity from the last 7 days.
+- VAD SOM INTE FUNKADE/whatDidNotWork must be honest and specific.
+- EN SAK DENNA VECKA/oneThingThisWeek must be one concrete action, not a list.
+- DIN CO-FOUNDER SÄGER/cofounderSays must be 2-3 sentences and sound like a direct partner speaking to the founder.
 
-  return digest;
+Company context:
+- project_id: ${args.projectId}
+- user_id: ${args.userId}
+- business_name: ${businessName}
+- industry: ${industry}
+- geo: ${brain.geoProfile ? JSON.stringify(brain.geoProfile) : 'unknown'}
+- project_analysis: ${JSON.stringify(analysis)}
+- state: ${JSON.stringify(brain.state)}
+- active_entries: ${JSON.stringify(
+    brain.activeEntries.map((entry) => ({
+      kind: entry.kind,
+      title: entry.title,
+      summary: entry.summary,
+      assertedAt: entry.assertedAt,
+      createdAt: entry.createdAt,
+      data: entry.data,
+    })),
+  )}
+- vertical_context: ${JSON.stringify(vertical ?? null)}
+- opportunity_context: ${JSON.stringify(opportunity ?? null)}
+- last_7_days_summary: ${JSON.stringify({
+    builder_event_count: builderEvents.length,
+    mentor_event_count: mentorEvents.length,
+    published_event_count: publishEvents.length,
+    analyzed_event_count: analyzedEvents.length,
+    file_change_event_count: changedEvents.length,
+    milestone_titles: milestoneTitles,
+    health_statuses: healthStatuses,
+    health_rows: healthRows ?? [],
+    events: events ?? [],
+  })}
+
+Return only JSON.`;
+
+  const result = await generateText({
+    model: anthropic('claude-sonnet-4-5-20250929'),
+    temperature: 0.2,
+    maxTokens: 1400,
+    prompt,
+  });
+
+  return normalizeDigest(lang, JSON.parse(extractJsonObject(result.text)), businessName);
 }

@@ -116,38 +116,51 @@ export async function action({ request, context }: ActionFunctionArgs) {
     const firstName = firstNameFromAuthUser(authUser);
 
     try {
-      const digest = await buildWeeklyDigestInsights({ projectId: project.id, userId });
+      const digest = await buildWeeklyDigestInsights({ projectId: project.id, userId, env: context.cloudflare?.env });
       if (!digest) {
         continue;
       }
 
-      const lang = (digest as any).lang as 'sv' | 'tr' | 'en';
-      const subject =
-        typeof (digest as any).subject === 'string'
-          ? String((digest as any).subject).replace('Din vecka, du:', `Din vecka, ${firstName}:`).replace('Haftan, du:', `Haftan, ${firstName}:`).replace('Your week, du:', `Your week, ${firstName}:`)
-          : lang === 'sv'
-            ? `Din vecka, ${firstName}`
-            : lang === 'tr'
-              ? `Haftan, ${firstName}`
-              : `Your week, ${firstName}`;
-
-      const happened = String((digest as any).happened ?? '').trim();
-      const keyTitle = String((digest as any).keyInsight?.title ?? '').trim();
-      const keyWhy = String((digest as any).keyInsight?.whyNow ?? '').trim();
-      const action = String((digest as any).action ?? '').trim();
-      const healthLine = String((digest as any).healthLine ?? '').trim();
-
+      const lang = digest.lang;
+      const subject = digest.subject;
+      const statusLabel = lang === 'sv' ? 'LÄGET' : lang === 'tr' ? 'DURUM' : 'STATUS';
+      const workedLabel = lang === 'sv' ? 'VAD SOM FUNKADE' : lang === 'tr' ? 'NEYİN İŞE YARADIĞI' : 'WHAT WORKED';
+      const didNotWorkLabel = lang === 'sv' ? 'VAD SOM INTE FUNKADE' : lang === 'tr' ? 'NEYİN İŞE YARAMADIĞI' : 'WHAT DID NOT WORK';
+      const oneThingLabel = lang === 'sv' ? 'EN SAK DENNA VECKA' : lang === 'tr' ? 'BU HAFTA TEK ŞEY' : 'ONE THING THIS WEEK';
+      const cofounderLabel = lang === 'sv' ? 'DIN CO-FOUNDER SÄGER' : lang === 'tr' ? 'KURUCU ORTAĞIN ŞUNU SÖYLÜYOR' : 'YOUR CO-FOUNDER SAYS';
+      const buttonLabel = lang === 'sv' ? 'Prata med Mentor →' : lang === 'tr' ? 'Mentor ile konuş →' : 'Talk to Mentor →';
       const footer = lang === 'sv' ? 'Svara på det här mejlet så svarar Mentor direkt.' : lang === 'tr' ? 'Bu e-postaya yanıt ver — Mentor direkt yanıtlar.' : 'Reply to this email and Mentor will answer directly.';
+      const origin = new URL(request.url).origin;
+      const mentorUrl = `${origin}/mentor`;
 
       const html = `
-        <div style="font-family: ui-sans-serif, system-ui, -apple-system; line-height: 1.5; color: #111;">
-          <p style="margin: 0 0 10px;"><b>${escapeHtml(subject)}</b></p>
-          <p style="margin: 0 0 10px;">${escapeHtml(happened)}</p>
-          <p style="margin: 0 0 6px;"><b>${escapeHtml(keyTitle)}</b></p>
-          <p style="margin: 0 0 10px;">${escapeHtml(keyWhy)}</p>
-          <p style="margin: 0 0 10px;"><b>${lang === 'sv' ? 'Rekommenderad action:' : lang === 'tr' ? 'Önerilen aksiyon:' : 'Recommended action:'}</b> ${escapeHtml(action)}</p>
-          <p style="margin: 0 0 10px;">${escapeHtml(healthLine)}</p>
-          <p style="margin: 12px 0 0; font-size: 12px; color: #555;">${escapeHtml(footer)}</p>
+        <div style="font-family: Inter, ui-sans-serif, system-ui, -apple-system; line-height: 1.6; color: #111827; background: #f8fafc; padding: 24px;">
+          <div style="max-width: 640px; margin: 0 auto; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 20px; overflow: hidden;">
+            <div style="padding: 28px 28px 20px; background: linear-gradient(135deg, #111827 0%, #312e81 100%); color: white;">
+              <div style="font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; opacity: 0.8;">Ridvan Weekly Digest</div>
+              <div style="margin-top: 10px; font-size: 26px; line-height: 1.25; font-weight: 700;">${escapeHtml(subject)}</div>
+            </div>
+            <div style="padding: 28px;">
+              <div style="margin: 0 0 18px; font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #6b7280;">${escapeHtml(statusLabel)}</div>
+              <p style="margin: 0 0 22px; font-size: 16px; color: #111827;">${escapeHtml(digest.statusLine)}</p>
+
+              <div style="margin: 0 0 18px; font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #6b7280;">${escapeHtml(workedLabel)}</div>
+              <p style="margin: 0 0 22px; font-size: 16px; color: #111827;">${escapeHtml(digest.whatWorked)}</p>
+
+              <div style="margin: 0 0 18px; font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #6b7280;">${escapeHtml(didNotWorkLabel)}</div>
+              <p style="margin: 0 0 22px; font-size: 16px; color: #111827;">${escapeHtml(digest.whatDidNotWork)}</p>
+
+              <div style="margin: 0 0 18px; font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #6b7280;">${escapeHtml(oneThingLabel)}</div>
+              <div style="margin: 0 0 22px; padding: 18px 20px; border-radius: 16px; background: #f3f4f6; color: #111827; font-size: 16px; font-weight: 600;">${escapeHtml(digest.oneThingThisWeek)}</div>
+
+              <div style="margin: 0 0 18px; font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #6b7280;">${escapeHtml(cofounderLabel)}</div>
+              <p style="margin: 0 0 26px; font-size: 16px; color: #111827;">${escapeHtml(digest.cofounderSays)}</p>
+
+              <a href="${escapeHtml(mentorUrl)}" style="display: inline-block; padding: 14px 20px; border-radius: 999px; background: linear-gradient(135deg, #7c3aed 0%, #ec4899 100%); color: #ffffff; text-decoration: none; font-weight: 700;">${escapeHtml(buttonLabel)}</a>
+
+              <p style="margin: 22px 0 0; font-size: 12px; color: #6b7280;">${escapeHtml(footer)}</p>
+            </div>
+          </div>
         </div>
       `;
 
