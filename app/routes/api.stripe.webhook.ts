@@ -1,6 +1,7 @@
 import { type ActionFunctionArgs } from '@remix-run/cloudflare';
 import Stripe from 'stripe';
 import { isEventProcessed, markEventFailed, markEventProcessed } from '~/lib/billing/webhook-events.server';
+import { captureError } from '~/lib/server/monitoring.server';
 import { PLANS, stripe } from '~/lib/stripe/config';
 import { supabaseAdmin } from '~/lib/supabase/server';
 
@@ -101,8 +102,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
     try {
       await markEventFailed(event.id, event.type, message);
     } catch (markError) {
+      captureError(markError, {
+        route: 'api.stripe.webhook',
+        extra: { eventId: event.id, eventType: event.type, stage: 'markEventFailed' },
+      });
       console.error('[RIDVAN-E1213] Failed to persist Stripe webhook failure', markError);
     }
+
+    captureError(error, {
+      route: 'api.stripe.webhook',
+      extra: { eventId: event.id, eventType: event.type },
+    });
 
     return Response.json({ error: `[RIDVAN-E1214] ${message}` }, { status: 500 });
   }

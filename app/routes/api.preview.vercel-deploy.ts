@@ -1,4 +1,5 @@
 import { type ActionFunctionArgs } from '@remix-run/cloudflare';
+import { captureError } from '~/lib/server/monitoring.server';
 import { supabaseAdmin } from '~/lib/supabase/server';
 
 const VERCEL_API_URL = 'https://api.vercel.com/v13/deployments';
@@ -250,25 +251,37 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const vercelProjectName = project.vercel_project_name?.trim() || deploymentName;
   const deployFiles = ensureSpaFiles(files);
 
-  const vercelRes = await fetch(VERCEL_API_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${vercelToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      name: vercelProjectName,
-      project: project.vercel_project_id ?? vercelProjectName,
-      public: true,
-      target: 'production',
-      files: deployFiles,
-      projectSettings: {
-        framework: null,
-      },
-    }),
-  });
+  let vercelRes: Response;
+  let deployment: VercelDeploymentResponse | null;
 
-  const deployment = (await vercelRes.json().catch(() => null)) as VercelDeploymentResponse | null;
+  try {
+    vercelRes = await fetch(VERCEL_API_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${vercelToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: vercelProjectName,
+        project: project.vercel_project_id ?? vercelProjectName,
+        public: true,
+        target: 'production',
+        files: deployFiles,
+        projectSettings: {
+          framework: null,
+        },
+      }),
+    });
+
+    deployment = (await vercelRes.json().catch(() => null)) as VercelDeploymentResponse | null;
+  } catch (error) {
+    captureError(error, {
+      route: 'api.preview.vercel-deploy',
+      userId: user.id,
+      extra: { stage: 'create_deployment', projectId, projectName: vercelProjectName },
+    });
+    throw error;
+  }
 
   if (!vercelRes.ok || !deployment?.id) {
     const message = deployment?.error?.message || `[RIDVAN-E1936] Vercel deploy failed (${vercelRes.status})`;

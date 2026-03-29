@@ -12,6 +12,7 @@ import { deductCredit } from '~/lib/credits/deduct';
 import { analyzeMentorAttachments, buildAttachmentPromptContext, type MentorAttachmentReference } from '~/lib/mentor/file-analysis.server';
 import { buildMentorSystemPrompt } from '~/lib/mentor/prompt.server';
 import { parseMentorJson } from '~/lib/mentor/parse.server';
+import { captureError } from '~/lib/server/monitoring.server';
 import { supabaseAdmin } from '~/lib/supabase/server';
 import { getVerticalContext } from '~/lib/vertical/context.server';
 
@@ -242,6 +243,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
     }
   } catch (error) {
+    captureError(error, {
+      route: 'api.mentor',
+      userId: user.id,
+      extra: { stage: 'mentor_gating', projectId, sessionId },
+    });
     console.error('[RIDVAN-E858] Mentor gating failed (non-blocking)', error);
   }
 
@@ -298,6 +304,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
     attachmentAnalysisContext = buildAttachmentPromptContext(attachmentAnalyses);
   } catch (error) {
     const messageText = error instanceof Error ? error.message : String(error ?? 'unknown error');
+    captureError(error, {
+      route: 'api.mentor',
+      userId: user.id,
+      extra: { stage: 'attachment_analysis', projectId, attachmentCount: attachments.length },
+    });
     console.error('[RIDVAN-ATTACHMENT] api.mentor:attachment_analysis_failed', {
       projectId,
       attachmentCount: attachments.length,
@@ -445,6 +456,11 @@ ${systemInstruction}` : baseSystem;
           .upsert({ user_id: user.id, project_id: projectId, has_unread: true, updated_at: new Date().toISOString() }, { onConflict: 'user_id,project_id' });
       }
     } catch (error) {
+      captureError(error, {
+        route: 'api.mentor',
+        userId: user.id,
+        extra: { stage: 'mentor_unread_upsert', projectId },
+      });
       console.error('[RIDVAN-E1706] Failed to update mentor_unread (non-blocking)', error);
     }
 
@@ -473,14 +489,29 @@ ${systemInstruction}` : baseSystem;
           new Promise<void>((resolve) => setTimeout(resolve, 1500)),
         ]);
       } catch (error) {
+        captureError(error, {
+          route: 'api.mentor',
+          userId: user.id,
+          extra: { stage: 'brain_ingestion_race', projectId, eventCount: eventIds.length },
+        });
         console.error('[RIDVAN-E855] Brain ingestion failed', error);
       }
 
       void ingestPromise.catch((error) => {
+        captureError(error, {
+          route: 'api.mentor',
+          userId: user.id,
+          extra: { stage: 'brain_ingestion_async', projectId, eventCount: eventIds.length },
+        });
         console.error('[RIDVAN-E856] Brain ingestion async continuation failed', error);
       });
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error ?? 'Unknown error');
+      captureError(error, {
+        route: 'api.mentor',
+        userId: user.id,
+        extra: { stage: 'insert_brain_events', projectId, eventCount: events.length },
+      });
       return Response.json({ error: `[RIDVAN-E854] Failed to write Brain events: ${messageText}`, reply: parsed.reply }, { status: 500 });
     }
 
