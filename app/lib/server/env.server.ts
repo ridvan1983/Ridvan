@@ -7,6 +7,8 @@ const REQUIRED_ENV_VARS = [
   'STRIPE_WEBHOOK_SECRET',
 ] as const;
 
+const OPTIONAL_ENV_VARS = ['ADMIN_SECRET'] as const;
+
 export function validateEnv(env: Record<string, string | undefined>) {
   const missing: string[] = [];
 
@@ -22,3 +24,4 @@ export function validateEnv(env: Record<string, string | undefined>) {
 }
 
 export { REQUIRED_ENV_VARS };
+export { OPTIONAL_ENV_VARS };

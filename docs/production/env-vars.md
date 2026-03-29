@@ -8,6 +8,7 @@
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Server-side privileged Supabase access | In Supabase Dashboard, open Project Settings > API and copy the service role key. Keep it server-only. |
 | `STRIPE_SECRET_KEY` | Yes | Server-side Stripe API access for checkout and billing | In Stripe Dashboard, open Developers > API keys and copy the secret key. |
 | `STRIPE_WEBHOOK_SECRET` | Yes | Verification of incoming Stripe webhook signatures | In Stripe Dashboard, open the webhook endpoint and copy the signing secret for that endpoint. |
+| `ADMIN_SECRET` | No | Bearer secret for internal admin routes such as billing reconciliation | Generate a long random secret locally or with a password manager and store it only in trusted environments. |
 
 ## Setup steps
 
@@ -17,10 +18,12 @@
 4. Copy the Stripe secret key from the API keys page.
 5. Create a Stripe webhook endpoint for your app and copy its signing secret.
 6. Create an Anthropic API key from the Anthropic dashboard.
-7. Add all values to your local `.env` and your production deployment environment.
+7. Optionally generate an `ADMIN_SECRET` for protected internal admin routes.
+8. Add all values to your local `.env` and your production deployment environment.
 
 ## Notes
 
 - Never expose `SUPABASE_SERVICE_ROLE_KEY` in client-side code.
 - Never commit real secrets to git.
 - `VITE_` variables are exposed to the frontend and must only contain safe public values.
+- `ADMIN_SECRET` should only be shared with trusted operators and never exposed in frontend code.
