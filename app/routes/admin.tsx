@@ -1,5 +1,5 @@
 import { redirect, type ActionFunctionArgs, type LoaderFunctionArgs } from '@remix-run/cloudflare';
-import { Form, useLoaderData, useSearchParams } from '@remix-run/react';
+import { Form, useFetcher, useLoaderData, useSearchParams } from '@remix-run/react';
 import { useMemo, useState } from 'react';
 import { getUserCreditHistory, type CreditLedgerEntry } from '~/lib/credits/ledger.server';
 import { supabaseAdmin } from '~/lib/supabase/server';
@@ -40,6 +40,13 @@ type SelectedUserDetails = {
   credits: CreditLedgerEntry[];
 };
 
+type FailedWebhookEvent = {
+  id: string;
+  type: string;
+  processed_at: string | null;
+  error: string | null;
+};
+
 type LoaderData =
   | {
       authenticated: false;
@@ -53,6 +60,7 @@ type LoaderData =
         activeSubscriptions: number;
         totalCreditsGranted: number;
       };
+      failedWebhookEvents: FailedWebhookEvent[];
       users: AdminUser[];
       selectedUserId: string | null;
       selectedUserDetails: SelectedUserDetails | null;
@@ -166,14 +174,24 @@ export async function loader({ context, request }: LoaderFunctionArgs): Promise<
   }
 
   const selectedUserId = url.searchParams.get('userId');
-  const [usersRaw, subscriptions, totalGrantedRows] = await Promise.all([
+  const [usersRaw, subscriptions, totalGrantedRows, failedWebhookRows] = await Promise.all([
     listAdminUsers(),
     listSubscriptions(),
     supabaseAdmin.from('credit_ledger').select('amount').returns<Array<{ amount: number }>>(),
+    supabaseAdmin
+      .from('stripe_webhook_events')
+      .select('id, type, processed_at, error')
+      .eq('status', 'failed')
+      .order('processed_at', { ascending: false })
+      .returns<FailedWebhookEvent[]>(),
   ]);
 
   if (totalGrantedRows.error) {
     throw new Error(`[RIDVAN-E1232] Failed to load credit ledger totals: ${totalGrantedRows.error.message}`);
+  }
+
+  if (failedWebhookRows.error) {
+    throw new Error(`[RIDVAN-E1238] Failed to load failed webhook events: ${failedWebhookRows.error.message}`);
   }
 
   const subscriptionMap = new Map(subscriptions.map((subscription) => [subscription.user_id, subscription]));
@@ -219,6 +237,7 @@ export async function loader({ context, request }: LoaderFunctionArgs): Promise<
       activeSubscriptions: subscriptions.filter((subscription) => (subscription.status ?? '').toLowerCase() === 'active').length,
       totalCreditsGranted,
     },
+    failedWebhookEvents: failedWebhookRows.data ?? [],
     users,
     selectedUserId,
     selectedUserDetails,
@@ -227,6 +246,7 @@ export async function loader({ context, request }: LoaderFunctionArgs): Promise<
 
 export default function AdminRoute() {
   const data = useLoaderData<typeof loader>() as LoaderData;
+  const replayFetcher = useFetcher<{ ok?: boolean; error?: string; eventId?: string; status?: string }>();
   const [searchParams] = useSearchParams();
   const [query, setQuery] = useState('');
 
@@ -306,6 +326,59 @@ export default function AdminRoute() {
           <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
             <div className="text-sm text-slate-400">Total credits utdelade</div>
             <div className="mt-2 text-3xl font-semibold">{data.overview.totalCreditsGranted}</div>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-semibold">Misslyckade webhooks</h2>
+              <p className="mt-1 text-sm text-slate-400">Stripe-events som ligger markerade som failed och kan köras om manuellt.</p>
+            </div>
+            {replayFetcher.data?.error ? <div className="text-sm text-rose-300">{replayFetcher.data.error}</div> : null}
+            {replayFetcher.data?.ok ? <div className="text-sm text-emerald-300">Webhook {replayFetcher.data.eventId} kördes om.</div> : null}
+          </div>
+          <div className="mt-4 overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="text-left text-slate-400">
+                <tr>
+                  <th className="px-3 py-2">Event ID</th>
+                  <th className="px-3 py-2">Typ</th>
+                  <th className="px-3 py-2">Processed at</th>
+                  <th className="px-3 py-2">Error</th>
+                  <th className="px-3 py-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.failedWebhookEvents.length === 0 ? (
+                  <tr>
+                    <td className="px-3 py-4 text-slate-500" colSpan={5}>
+                      Inga misslyckade webhooks.
+                    </td>
+                  </tr>
+                ) : (
+                  data.failedWebhookEvents.map((event) => (
+                    <tr key={event.id} className="border-t border-slate-800/80 align-top">
+                      <td className="px-3 py-3 font-mono text-xs text-slate-300">{event.id}</td>
+                      <td className="px-3 py-3">{event.type}</td>
+                      <td className="px-3 py-3 text-slate-400">{event.processed_at ? new Date(event.processed_at).toLocaleString() : '—'}</td>
+                      <td className="px-3 py-3 text-xs text-rose-200">{event.error ?? 'Unknown error'}</td>
+                      <td className="px-3 py-3 text-right">
+                        <replayFetcher.Form method="post" action="/api/admin/webhooks/replay">
+                          <input type="hidden" name="eventId" value={event.id} />
+                          <button
+                            type="submit"
+                            className="rounded-lg border border-sky-500/40 px-3 py-1.5 text-xs text-sky-300 hover:bg-sky-500/10"
+                          >
+                            Kör om
+                          </button>
+                        </replayFetcher.Form>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
 
