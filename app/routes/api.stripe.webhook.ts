@@ -1,5 +1,6 @@
 import { type ActionFunctionArgs } from '@remix-run/cloudflare';
 import Stripe from 'stripe';
+import { isEventProcessed, markEventFailed, markEventProcessed } from '~/lib/billing/webhook-events.server';
 import { PLANS, stripe } from '~/lib/stripe/config';
 import { supabaseAdmin } from '~/lib/supabase/server';
 
@@ -25,6 +26,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
   }
 
   try {
+    if (await isEventProcessed(event.id)) {
+      return Response.json({ received: true, duplicate: true });
+    }
+
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object as Stripe.Checkout.Session;
       const userId = session.metadata?.userId;
@@ -87,8 +92,18 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
     }
 
+    await markEventProcessed(event.id, event.type);
+
     return Response.json({ received: true });
-  } catch {
-    return Response.json({ received: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown Stripe webhook processing error';
+
+    try {
+      await markEventFailed(event.id, event.type, message);
+    } catch (markError) {
+      console.error('[RIDVAN-E1213] Failed to persist Stripe webhook failure', markError);
+    }
+
+    return Response.json({ error: `[RIDVAN-E1214] ${message}` }, { status: 500 });
   }
 }
