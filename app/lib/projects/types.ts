@@ -5,6 +5,10 @@ export interface Project {
   previewUrl?: string | null;
   vercelProjectId?: string | null;
   customDomain?: string | null;
+  supabaseProjectId?: string | null;
+  supabaseProjectUrl?: string | null;
+  supabaseAnonKey?: string | null;
+  supabaseConnectedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -1,5 +1,5 @@
 import type { Session, User } from '@supabase/supabase-js';
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '~/lib/supabase/client';
 
 interface AuthContextValue {
@@ -17,36 +17,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const authEventReceived = useRef(false);
 
   useEffect(() => {
     const initializeAuth = async () => {
-      try {
-        const { data, error } = await supabase.auth.getSession();
+      const { data, error } = await supabase.auth.getSession();
 
-        if (error) {
-          throw new Error(`[RIDVAN-E003] Failed to initialize auth session: ${error.message}`);
-        }
-
-        setSession(data.session ?? null);
-        setUser(data.session?.user ?? null);
-      } catch (error) {
-        console.error(error);
-        setSession(null);
-        setUser(null);
-      } finally {
-        setLoading(false);
+      if (error) {
+        throw new Error(`[RIDVAN-E003] Failed to initialize auth session: ${error.message}`);
       }
+
+      setSession(data.session ?? null);
+      setUser(data.session?.user ?? null);
     };
 
-    initializeAuth();
+    initializeAuth().catch((error) => {
+      console.error(error);
+      setSession(null);
+      setUser(null);
+    });
 
     const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      authEventReceived.current = true;
       setSession(nextSession ?? null);
       setUser(nextSession?.user ?? null);
       setLoading(false);
     });
 
+    const loadingTimeout = window.setTimeout(() => {
+      if (!authEventReceived.current) {
+        setLoading(false);
+      }
+    }, 1500);
+
     return () => {
+      clearTimeout(loadingTimeout);
       data.subscription.unsubscribe();
     };
   }, []);

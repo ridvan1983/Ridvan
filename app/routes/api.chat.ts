@@ -30,10 +30,12 @@ function getUsageTotals(usage: unknown) {
     inputTokens: Number.isFinite(inputTokens) ? inputTokens : 0,
     outputTokens: Number.isFinite(outputTokens) ? outputTokens : 0,
     hasUsage,
-  };
+  }
 }
 
 async function chatAction({ context, request }: ActionFunctionArgs) {
+  const cloudflareEnv = context.cloudflare?.env as Env;
+
   if (DEBUG) {
     console.log('[RIDVAN DEBUG][api.chat] action:start', { method: request.method, url: request.url, ts: Date.now() });
   }
@@ -44,8 +46,8 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
     envSource: 'process.env',
   });
   console.log('[RIDVAN DEBUG] CF ENV CHECK:', {
-    hasApiKey: !!context.cloudflare?.env?.ANTHROPIC_API_KEY,
-    keyPrefix: context.cloudflare?.env?.ANTHROPIC_API_KEY?.substring(0, 15),
+    hasApiKey: !!cloudflareEnv?.ANTHROPIC_API_KEY,
+    keyPrefix: cloudflareEnv?.ANTHROPIC_API_KEY?.substring(0, 15),
     envSource: 'context.cloudflare.env',
   });
 
@@ -164,7 +166,7 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
       }
 
       try {
-        return await streamText(inputMessages, context.cloudflare.env, options);
+        return await streamText(inputMessages, cloudflareEnv, options);
       } catch (error) {
         if (!isOverloadedError(error)) {
           throw error;
@@ -305,7 +307,7 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
     return new Response(outputStream, {
       status: 200,
       headers: {
-        contentType: 'text/plain; charset=utf-8',
+        'Content-Type': 'text/plain; charset=utf-8',
         'X-RateLimit-Remaining': String(rateLimit.remaining),
         'X-RateLimit-Reset': String(rateLimit.resetInMs),
       },

@@ -9,6 +9,10 @@ interface ProjectRow {
   user_id: string;
   title: string | null;
   preview_url: string | null;
+  supabase_project_id: string | null;
+  supabase_project_url: string | null;
+  supabase_anon_key: string | null;
+  supabase_connected_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -132,7 +136,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const { data, error } = await supabaseAdmin
     .from('projects')
-    .select('id, user_id, title, preview_url, created_at, updated_at')
+    .select('id, user_id, title, preview_url, supabase_project_id, supabase_project_url, supabase_anon_key, supabase_connected_at, created_at, updated_at')
     .eq('user_id', user.id)
     .order('updated_at', { ascending: false })
     .returns<ProjectRow[]>();
@@ -149,6 +153,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       previewUrl: row.preview_url,
       vercelProjectId: null,
       customDomain: null,
+      supabaseProjectId: row.supabase_project_id,
+      supabaseProjectUrl: row.supabase_project_url,
+      supabaseAnonKey: row.supabase_anon_key,
+      supabaseConnectedAt: row.supabase_connected_at,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     })),
@@ -184,7 +192,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const { data: existingProject, error: existingProjectError } = await supabaseAdmin
     .from('projects')
-    .select('id, user_id, title, preview_url, created_at, updated_at')
+    .select('id, user_id, title, preview_url, supabase_project_id, supabase_project_url, supabase_anon_key, supabase_connected_at, created_at, updated_at')
     .eq('id', id)
     .eq('user_id', user.id)
     .maybeSingle<ProjectRow>();
@@ -204,7 +212,7 @@ export async function action({ request }: ActionFunctionArgs) {
       })
       .eq('id', id)
       .eq('user_id', user.id)
-      .select('id, user_id, title, preview_url, created_at, updated_at')
+      .select('id, user_id, title, preview_url, supabase_project_id, supabase_project_url, supabase_anon_key, supabase_connected_at, created_at, updated_at')
       .single<ProjectRow>();
 
     data = result.data;
@@ -220,7 +228,7 @@ export async function action({ request }: ActionFunctionArgs) {
         title,
         updated_at: now,
       })
-      .select('id, user_id, title, preview_url, created_at, updated_at')
+      .select('id, user_id, title, preview_url, supabase_project_id, supabase_project_url, supabase_anon_key, supabase_connected_at, created_at, updated_at')
       .single<ProjectRow>();
 
     data = result.data;
@@ -238,6 +246,10 @@ export async function action({ request }: ActionFunctionArgs) {
     previewUrl: data.preview_url,
     vercelProjectId: null,
     customDomain: null,
+    supabaseProjectId: data.supabase_project_id,
+    supabaseProjectUrl: data.supabase_project_url,
+    supabaseAnonKey: data.supabase_anon_key,
+    supabaseConnectedAt: data.supabase_connected_at,
     createdAt: data.created_at,
     updatedAt: data.updated_at,
   });

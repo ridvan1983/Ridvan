@@ -16,6 +16,7 @@ import { cubicEasingFn } from '~/utils/easings';
 import { renderLogger } from '~/utils/logger';
 import { EditorPanel } from './EditorPanel';
 import { Preview } from './Preview';
+import { WorkbenchSupabaseButton } from './WorkbenchSupabaseButton.client';
 
 interface WorkspaceProps {
   chatStarted?: boolean;
@@ -121,6 +122,7 @@ export const Workbench = memo(({ chatStarted, isStreaming }: WorkspaceProps) => 
               <div className="flex items-center px-3 py-2 border-b border-bolt-elements-borderColor">
                 <Slider selected={selectedView} options={sliderOptions} setSelected={setSelectedView} />
                 <div className="ml-auto" />
+                <WorkbenchSupabaseButton />
                 {selectedView === 'code' && (
                   <PanelHeaderButton
                     className="mr-1 text-sm"

@@ -17,11 +17,19 @@ type DeployFile = {
 type WebContainerDirEntry = string | { name?: string };
 
 type PublishModalStep = 'publish' | 'done' | 'domain';
+type DeployProvider = 'vercel' | 'netlify';
+type DeployStage = 'idle' | 'uploading' | 'building' | 'live' | 'error';
 
 type DeployResponse = {
   url?: string;
   error?: string;
+  ok?: boolean;
+  status?: string;
+  provider?: DeployProvider;
+  reused?: boolean;
   vercelProjectId?: string | null;
+  netlifySiteId?: string | null;
+  netlifySiteName?: string | null;
   customDomain?: string | null;
   suggestedSubdomain?: string | null;
 };
@@ -163,6 +171,8 @@ export const Preview = memo(() => {
   const [isPublishing, setIsPublishing] = useState(false);
   const [liveUrl, setLiveUrl] = useState<string | null>(null);
   const [vercelProjectId, setVercelProjectId] = useState<string | null>(null);
+  const [deployProvider, setDeployProvider] = useState<DeployProvider | null>(null);
+  const [deployStage, setDeployStage] = useState<DeployStage>('idle');
   const [customDomain, setCustomDomain] = useState<string | null>(null);
   const [publishError, setPublishError] = useState<string>('');
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
@@ -175,6 +185,17 @@ export const Preview = memo(() => {
   const [isConnectingDomain, setIsConnectingDomain] = useState(false);
 
   const resolvedLiveUrl = customDomain ? `https://${customDomain}` : liveUrl;
+
+  const deployStageLabel =
+    deployStage === 'uploading'
+      ? 'Uploading'
+      : deployStage === 'building'
+        ? 'Building'
+        : deployStage === 'live'
+          ? 'Live'
+          : deployStage === 'error'
+            ? 'Error'
+            : 'Idle';
 
   const handlePreviewLoad = useCallback(() => {
     const projectId = organismProjectId.get();
@@ -289,7 +310,18 @@ export const Preview = memo(() => {
     setDomainError('');
     setDomainSuccess('');
     setPublishStatusText('');
+    setDeployStage(resolvedLiveUrl ? 'live' : 'idle');
     setPublishModalStep(resolvedLiveUrl ? 'done' : 'publish');
+    setIsPublishModalOpen(true);
+  };
+
+  const openRedeployModal = () => {
+    setPublishError('');
+    setDomainError('');
+    setDomainSuccess('');
+    setPublishStatusText('');
+    setDeployStage('idle');
+    setPublishModalStep('publish');
     setIsPublishModalOpen(true);
   };
 
@@ -305,6 +337,34 @@ export const Preview = memo(() => {
     setPublishStatusText('');
   };
 
+  const copyLiveUrl = async () => {
+    if (!resolvedLiveUrl) {
+      return;
+    }
+
+    await navigator.clipboard.writeText(resolvedLiveUrl).catch(() => {});
+  };
+
+  const deployWithProvider = async (provider: DeployProvider, payload: Record<string, unknown>, accessToken: string) => {
+    const endpoint = provider === 'vercel' ? '/api/preview/vercel-deploy' : '/api/preview/deploy';
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const json = (await response.json().catch(() => null)) as DeployResponse | null;
+
+    if (!response.ok) {
+      throw new Error(json?.error || `[RIDVAN-E1980] ${provider} deploy failed (${response.status})`);
+    }
+
+    return json;
+  };
+
   const publishPreview = async () => {
     const accessToken = organismAccessToken.get();
     const projectId = organismProjectId.get();
@@ -317,7 +377,8 @@ export const Preview = memo(() => {
     setDomainError('');
     setDomainSuccess('');
     setIsPublishing(true);
-    setPublishStatusText('Publicerar...');
+    setDeployStage('uploading');
+    setPublishStatusText('Uploading build assets...');
 
     try {
       const sourceFiles = collectTextFiles(workbenchStore.files.get());
@@ -326,29 +387,25 @@ export const Preview = memo(() => {
         .map(([filePath, content]) => `${filePath}\n${content}`)
         .join('\n---\n');
       const sourceHash = await hashString(manifest);
+      const existing = await deployWithProvider('vercel', { projectId, sourceHash }, accessToken).catch(async (error) => {
+        const message = error instanceof Error ? error.message : String(error ?? '');
 
-      const existingRes = await fetch('/api/preview/vercel-deploy', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ projectId, sourceHash }),
+        if (!message.includes('409')) {
+          return null;
+        }
+
+        return null;
       });
 
-      if (existingRes.ok) {
-        const existing = (await existingRes.json()) as DeployResponse;
-
-        if (existing.url) {
-          setLiveUrl(existing.url);
-          setVercelProjectId(existing.vercelProjectId ?? null);
-          setCustomDomain(existing.customDomain ?? null);
-          setPublishStatusText('Klart!');
-          setPublishModalStep('done');
-          return;
-        }
-      } else if (existingRes.status !== 409) {
-        throw new Error(`[RIDVAN-E1919] Failed to check deployed preview (${existingRes.status})`);
+      if (existing?.url) {
+        setDeployProvider(existing.provider ?? 'vercel');
+        setDeployStage('live');
+        setLiveUrl(existing.url);
+        setVercelProjectId(existing.vercelProjectId ?? null);
+        setCustomDomain(existing.customDomain ?? null);
+        setPublishStatusText('Live URL ready.');
+        setPublishModalStep('done');
+        return;
       }
 
       workbenchStore.saveAllFiles();
@@ -356,6 +413,8 @@ export const Preview = memo(() => {
       const wc = await webcontainer;
       const needsInstall = !(await hasNodeModules());
       const buildCommand = needsInstall ? 'npm install && npm run build' : 'npm run build';
+      setDeployStage('building');
+      setPublishStatusText('Building production bundle...');
       const buildProcess = await wc.spawn('jsh', ['-c', buildCommand], {
         env: { npm_config_yes: 'true' },
       });
@@ -375,43 +434,48 @@ export const Preview = memo(() => {
         throw new Error(outputChunks.join('').trim() || `[RIDVAN-E1920] Build failed with code ${exitCode}`);
       }
 
-      setPublishStatusText('Publicerar...');
+      setDeployStage('uploading');
+      setPublishStatusText('Uploading static files to hosting provider...');
 
       const distFiles = await readDistFiles('dist');
-
-      console.log('[RIDVAN-PREVIEW] dist files prepared for Vercel:', distFiles.map((file) => file.file));
 
       if (!distFiles.some((file) => file.file === 'index.html')) {
         throw new Error('[RIDVAN-E1921] Build completed but dist/index.html was not found');
       }
 
-      const deployRes = await fetch('/api/preview/vercel-deploy', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          projectId,
-          sourceHash,
-          projectName: document.title || 'ridvan-app',
-          subdomain: publishSubdomain,
-          files: distFiles,
-        }),
-      });
+      const deployPayload = {
+        projectId,
+        sourceHash,
+        projectName: document.title || 'ridvan-app',
+        subdomain: publishSubdomain,
+        files: distFiles,
+      };
 
-      const deployJson = (await deployRes.json().catch(() => null)) as DeployResponse | null;
+      let deployJson: DeployResponse | null = null;
 
-      if (!deployRes.ok || !deployJson?.url) {
-        throw new Error(deployJson?.error || `[RIDVAN-E1922] Preview deploy failed (${deployRes.status})`);
+      try {
+        deployJson = await deployWithProvider('vercel', deployPayload, accessToken);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Vercel deploy failed';
+        setPublishStatusText('Vercel unavailable, retrying with Netlify...');
+        deployJson = await deployWithProvider('netlify', deployPayload, accessToken).catch(() => {
+          throw new Error(message);
+        });
       }
 
+      if (!deployJson?.url) {
+        throw new Error('[RIDVAN-E1922] Preview deploy returned no live URL');
+      }
+
+      setDeployProvider(deployJson.provider ?? 'vercel');
+      setDeployStage('live');
       setLiveUrl(deployJson.url);
       setVercelProjectId(deployJson.vercelProjectId ?? null);
       setCustomDomain(deployJson.customDomain ?? null);
-      setPublishStatusText('Klart!');
+      setPublishStatusText('Live URL ready.');
       setPublishModalStep('done');
     } catch (error) {
+      setDeployStage('error');
       setPublishError(error instanceof Error ? error.message : 'Publicering misslyckades');
       setPublishStatusText('');
     } finally {
@@ -478,16 +542,42 @@ export const Preview = memo(() => {
           />
         )}
         {(iframeUrl ?? activePreview?.baseUrl) && (
-          <button
-            className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white"
-            style={{ background: 'linear-gradient(135deg, #7C3AED, #EC4899)' }}
-            onClick={openPublishModal}
-            disabled={isPublishing}
-            title={isPublishing ? 'Publicerar...' : resolvedLiveUrl ? 'Live →' : 'Publicera'}
-          >
-            <span className={`${isPublishing ? 'i-ph:spinner-gap animate-spin' : resolvedLiveUrl ? 'i-ph:globe' : 'i-ph:upload-simple'} text-base`} />
-            <span>{isPublishing ? 'Publicerar...' : resolvedLiveUrl ? 'Live →' : 'Publicera'}</span>
-          </button>
+          resolvedLiveUrl ? (
+            <>
+              <button
+                className="inline-flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-medium text-violet-700"
+                onClick={() => {
+                  void openPreviewInNewTab();
+                }}
+                disabled={isPublishing}
+                title="Live →"
+              >
+                <span className="i-ph:globe text-base" />
+                <span>Live →</span>
+              </button>
+              <button
+                className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white"
+                style={{ background: 'linear-gradient(135deg, #7C3AED, #EC4899)' }}
+                onClick={openRedeployModal}
+                disabled={isPublishing}
+                title={isPublishing ? 'Publicerar...' : 'Publicera igen'}
+              >
+                <span className={`${isPublishing ? 'i-ph:spinner-gap animate-spin' : 'i-ph:arrow-clockwise'} text-base`} />
+                <span>{isPublishing ? 'Publicerar...' : 'Publicera igen'}</span>
+              </button>
+            </>
+          ) : (
+            <button
+              className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white"
+              style={{ background: 'linear-gradient(135deg, #7C3AED, #EC4899)' }}
+              onClick={openPublishModal}
+              disabled={isPublishing}
+              title={isPublishing ? 'Publicerar...' : 'Publicera'}
+            >
+              <span className={`${isPublishing ? 'i-ph:spinner-gap animate-spin' : 'i-ph:upload-simple'} text-base`} />
+              <span>{isPublishing ? 'Publicerar...' : 'Publicera'}</span>
+            </button>
+          )
         )}
         <div
           className="flex items-center gap-1 flex-grow bg-bolt-elements-preview-addressBar-background border border-bolt-elements-borderColor text-bolt-elements-preview-addressBar-text rounded-full px-3 py-1 text-sm hover:bg-bolt-elements-preview-addressBar-backgroundHover hover:focus-within:bg-bolt-elements-preview-addressBar-backgroundActive focus-within:bg-bolt-elements-preview-addressBar-backgroundActive
@@ -545,7 +635,26 @@ export const Preview = memo(() => {
                     <h2 className="text-2xl font-semibold text-slate-900">Publicera ditt projekt</h2>
                     <p className="text-sm text-slate-600">Välj vilken adress ditt projekt ska få när det går live.</p>
                   </div>
-                  <div className="text-sm text-slate-600">Klicka Publicera så går ditt projekt live på några sekunder.</div>
+                  <div className="rounded-[12px] border border-slate-200 bg-white p-4 text-sm text-slate-700 space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-medium">Provider</span>
+                      <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-700">
+                        {deployProvider ?? 'Auto'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-medium">Status</span>
+                      <span className="rounded-full bg-violet-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-violet-700">
+                        {deployStageLabel}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-xs text-slate-500">
+                      <div className={deployStage === 'uploading' || deployStage === 'building' || deployStage === 'live' ? 'font-semibold text-slate-900' : ''}>Uploading</div>
+                      <div className={deployStage === 'building' || deployStage === 'live' ? 'font-semibold text-slate-900' : ''}>Building</div>
+                      <div className={deployStage === 'live' ? 'font-semibold text-emerald-700' : ''}>Live</div>
+                    </div>
+                  </div>
+                  <div className="text-sm text-slate-600">Vercel används först. Om det misslyckas försöker appen automatiskt via Netlify.</div>
                   {publishStatusText ? <div className="text-sm font-medium text-slate-700">{publishStatusText}</div> : null}
                   {publishError ? <div className="rounded-[8px] bg-red-50 px-4 py-3 text-sm text-red-600">{publishError}</div> : null}
                   <button
@@ -574,15 +683,18 @@ export const Preview = memo(() => {
                   </div>
                   <div className="rounded-[12px] border border-slate-200 bg-white p-4">
                     <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                      <a className="text-sm font-medium text-violet-700 underline break-all" href={resolvedLiveUrl ?? '#'} target="_blank" rel="noreferrer">
-                        {resolvedLiveUrl}
-                      </a>
+                      <div className="space-y-1">
+                        <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                          {deployProvider ? `${deployProvider} deploy` : 'Live deploy'}
+                        </div>
+                        <a className="text-sm font-medium text-violet-700 underline break-all" href={resolvedLiveUrl ?? '#'} target="_blank" rel="noreferrer">
+                          {resolvedLiveUrl}
+                        </a>
+                      </div>
                       <button
                         className="rounded-[8px] border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700"
                         onClick={() => {
-                          if (resolvedLiveUrl) {
-                            void navigator.clipboard.writeText(resolvedLiveUrl).catch(() => {});
-                          }
+                          void copyLiveUrl();
                         }}
                       >
                         Kopiera

@@ -36,12 +36,13 @@ async function requireOwnedProject(projectId: string, userId: string) {
   return data;
 }
 
-export async function action({ request }: ActionFunctionArgs) {
+export async function action({ context, request }: ActionFunctionArgs) {
   if (request.method !== 'POST') {
     return Response.json({ error: 'Method Not Allowed' }, { status: 405 });
   }
 
-  const vercelToken = process.env.VERCEL_TOKEN;
+  const cloudflareEnv = context.cloudflare?.env as { VERCEL_TOKEN?: string } | undefined;
+  const vercelToken = cloudflareEnv?.VERCEL_TOKEN ?? process.env.VERCEL_TOKEN;
 
   if (!vercelToken) {
     return Response.json({ error: '[RIDVAN-E1943] Missing VERCEL_TOKEN environment variable' }, { status: 500 });

@@ -1,10 +1,9 @@
-import { Navigate, useSearchParams } from '@remix-run/react';
+import { Navigate } from '@remix-run/react';
 import { LoginPage } from '~/components/auth/LoginPage';
 import { useAuth } from '~/lib/auth/AuthContext';
 
 export default function LoginRoute() {
-  const [searchParams] = useSearchParams();
-  const { user, session, loading } = useAuth();
+  const { user, loading } = useAuth();
 
   if (loading) {
     return (
@@ -14,9 +13,8 @@ export default function LoginRoute() {
     );
   }
 
-  if (user && session) {
-    const redirectTarget = searchParams.get('redirect') || '/chat';
-    return <Navigate to={redirectTarget} replace />;
+  if (user) {
+    return <Navigate to="/chat" replace />;
   }
 
   return <LoginPage />;

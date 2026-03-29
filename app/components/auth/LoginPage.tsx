@@ -1,4 +1,4 @@
-import { useNavigate, useSearchParams } from '@remix-run/react';
+import { useNavigate } from '@remix-run/react';
 import { useState } from 'react';
 import { brand } from '~/config/brand';
 import { useAuth } from '~/lib/auth/AuthContext';
@@ -7,7 +7,6 @@ type AuthMode = 'login' | 'signup';
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const { signIn, signUp } = useAuth();
 
   const [mode, setMode] = useState<AuthMode>('login');
@@ -18,7 +17,6 @@ export function LoginPage() {
 
   const modeLabel = mode === 'login' ? 'Log in' : 'Sign up';
   const toggleLabel = mode === 'login' ? 'Need an account? Sign up' : 'Already have an account? Log in';
-  const redirectTarget = searchParams.get('redirect') || '/';
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -32,7 +30,7 @@ export function LoginPage() {
         await signUp(email, password);
       }
 
-      navigate(redirectTarget);
+      navigate('/chat');
     } catch (error) {
       const message = error instanceof Error ? error.message : '[RIDVAN-E008] Authentication failed';
       setErrorMessage(message);
