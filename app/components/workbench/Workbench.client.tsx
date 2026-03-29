@@ -1,12 +1,13 @@
 import { useStore } from '@nanostores/react';
 import { motion, type HTMLMotionProps, type Variants } from 'framer-motion';
 import { computed } from 'nanostores';
-import { memo, useCallback, useEffect } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import { toast } from 'react-toastify';
 import {
   type OnChangeCallback as OnEditorChange,
   type OnScrollCallback as OnEditorScroll,
 } from '~/components/editor/codemirror/CodeMirrorEditor';
+import { ProjectIntelligencePanel } from '~/components/project-intelligence/ProjectIntelligencePanel';
 import { IconButton } from '~/components/ui/IconButton';
 import { PanelHeaderButton } from '~/components/ui/PanelHeaderButton';
 import { Slider, type SliderOptions } from '~/components/ui/Slider';
@@ -56,6 +57,7 @@ const workbenchVariants = {
 export const Workbench = memo(({ chatStarted, isStreaming }: WorkspaceProps) => {
   renderLogger.trace('Workbench');
 
+  const [showIntelligencePanel, setShowIntelligencePanel] = useState(false);
   const hasPreview = useStore(computed(workbenchStore.previews, (previews) => previews.length > 0));
   const showWorkbench = useStore(workbenchStore.showWorkbench);
   const selectedFile = useStore(workbenchStore.selectedFile);
@@ -122,6 +124,10 @@ export const Workbench = memo(({ chatStarted, isStreaming }: WorkspaceProps) => 
               <div className="flex items-center px-3 py-2 border-b border-bolt-elements-borderColor">
                 <Slider selected={selectedView} options={sliderOptions} setSelected={setSelectedView} />
                 <div className="ml-auto" />
+                <PanelHeaderButton className="mr-1 text-sm" onClick={() => setShowIntelligencePanel((value) => !value)}>
+                  <div className="i-ph:brain text-base" />
+                  Intelligence
+                </PanelHeaderButton>
                 <WorkbenchSupabaseButton />
                 {selectedView === 'code' && (
                   <PanelHeaderButton
@@ -144,6 +150,7 @@ export const Workbench = memo(({ chatStarted, isStreaming }: WorkspaceProps) => 
                 />
               </div>
               <div className="relative flex-1 overflow-hidden">
+                <ProjectIntelligencePanel isOpen={showIntelligencePanel} onClose={() => setShowIntelligencePanel(false)} />
                 <View
                   initial={{ x: selectedView === 'code' ? 0 : '-100%' }}
                   animate={{ x: selectedView === 'code' ? 0 : '-100%' }}

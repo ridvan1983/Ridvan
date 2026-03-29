@@ -124,6 +124,26 @@ export function getModulesForIndustry(industry: NormalizedIndustry, geoCountryCo
         why_now: 'Retention is measurable. If you don’t track it, you guess.',
       },
     ],
+    law_firm: [
+      {
+        module_key: 'case_intake',
+        label: 'Case intake',
+        description: 'Collect structured legal case details before the first call.',
+        why_now: 'Good intake protects partner time and improves lead quality.',
+      },
+      {
+        module_key: 'consultation_booking',
+        label: 'Consultation booking',
+        description: 'Let prospects request an initial consultation with clear scope.',
+        why_now: 'Fast response speed often decides who wins the client.',
+      },
+      {
+        module_key: 'document_signing',
+        label: 'Document signing',
+        description: 'Move agreements and approvals forward digitally.',
+        why_now: 'Reducing paperwork delays speeds up matter conversion.',
+      },
+    ],
     legal_firm: [
       {
         module_key: 'intake_form',
@@ -250,6 +270,26 @@ export function getModulesForIndustry(industry: NormalizedIndustry, geoCountryCo
         why_now: 'Pricing ambiguity slows down bookings.',
       },
     ],
+    e_commerce: [
+      {
+        module_key: 'product_catalog',
+        label: 'Product catalog',
+        description: 'Show products, variants, and merchandising clearly.',
+        why_now: 'Customers need confidence before they add to cart.',
+      },
+      {
+        module_key: 'checkout',
+        label: 'Checkout',
+        description: 'Turn buying intent into paid orders with low friction.',
+        why_now: 'Checkout quality is the main revenue lever in commerce.',
+      },
+      {
+        module_key: 'inventory',
+        label: 'Inventory',
+        description: 'Keep availability accurate across products and variants.',
+        why_now: 'Stock errors create support load and trust loss.',
+      },
+    ],
     ecommerce: [
       {
         module_key: 'checkout',
@@ -262,6 +302,126 @@ export function getModulesForIndustry(industry: NormalizedIndustry, geoCountryCo
         label: 'Order tracking',
         description: 'Reduce support load with clear delivery status.',
         why_now: 'Support cost is a hidden margin killer.',
+      },
+    ],
+    food_delivery: [
+      {
+        module_key: 'order_management',
+        label: 'Order management',
+        description: 'Receive, route, and complete delivery orders efficiently.',
+        why_now: 'Operational clarity is the core of delivery margin.',
+      },
+      {
+        module_key: 'realtime_tracking',
+        label: 'Realtime tracking',
+        description: 'Show delivery progress to customers and reduce support tickets.',
+        why_now: 'Delivery uncertainty creates churn and support cost.',
+      },
+      {
+        module_key: 'delivery_zones',
+        label: 'Delivery zones',
+        description: 'Control where you deliver and what margin each zone supports.',
+        why_now: 'Bad zone logic quietly destroys profitability.',
+      },
+    ],
+    education: [
+      {
+        module_key: 'course_catalog',
+        label: 'Course catalog',
+        description: 'Make courses, outcomes, and pricing easy to compare.',
+        why_now: 'People do not enroll when the offer is unclear.',
+      },
+      {
+        module_key: 'student_portal',
+        label: 'Student portal',
+        description: 'Give students one place for lessons, updates, and progress.',
+        why_now: 'A clear learning experience improves retention.',
+      },
+      {
+        module_key: 'certificates',
+        label: 'Certificates',
+        description: 'Reward completion with automated certificates.',
+        why_now: 'Completion proof increases perceived value and referrals.',
+      },
+    ],
+    auto_repair: [
+      {
+        module_key: 'service_booking',
+        label: 'Service booking',
+        description: 'Capture workshop demand with structured service requests.',
+        why_now: 'Phone-only booking creates missed demand and admin drag.',
+      },
+      {
+        module_key: 'vehicle_history',
+        label: 'Vehicle history',
+        description: 'Show service history and recommendations per vehicle.',
+        why_now: 'Trust and repeat service come from documented history.',
+      },
+      {
+        module_key: 'parts_order',
+        label: 'Parts ordering',
+        description: 'Speed up fulfillment by linking parts demand to jobs.',
+        why_now: 'Parts delays reduce workshop utilization.',
+      },
+    ],
+    accounting: [
+      {
+        module_key: 'client_portal',
+        label: 'Client portal',
+        description: 'Centralize document exchange and client communication.',
+        why_now: 'Messy communication wastes billable time.',
+      },
+      {
+        module_key: 'invoice_generator',
+        label: 'Invoice generator',
+        description: 'Create and send invoices with less manual work.',
+        why_now: 'Billing speed improves cash flow immediately.',
+      },
+      {
+        module_key: 'tax_calculator',
+        label: 'Tax calculator',
+        description: 'Turn tax complexity into a useful client-facing tool.',
+        why_now: 'Helpful tools build trust and generate better leads.',
+      },
+    ],
+    event_planning: [
+      {
+        module_key: 'event_registration',
+        label: 'Event registration',
+        description: 'Manage signups and attendee data in one flow.',
+        why_now: 'Registration clarity is the foundation of event conversion.',
+      },
+      {
+        module_key: 'ticket_sales',
+        label: 'Ticket sales',
+        description: 'Sell tickets directly with clean confirmation flows.',
+        why_now: 'Revenue depends on reducing friction from interest to purchase.',
+      },
+      {
+        module_key: 'seating_plan',
+        label: 'Seating plan',
+        description: 'Handle placements and guest logistics without chaos.',
+        why_now: 'Operational clarity reduces event-day risk.',
+      },
+    ],
+    photography: [
+      {
+        module_key: 'portfolio_gallery',
+        label: 'Portfolio gallery',
+        description: 'Present signature work in a premium, conversion-friendly format.',
+        why_now: 'Photography buyers decide based on proof and style fit.',
+      },
+      {
+        module_key: 'shoot_booking',
+        label: 'Shoot booking',
+        description: 'Turn inquiries into booked sessions quickly.',
+        why_now: 'A clear booking step reduces lead leakage.',
+      },
+      {
+        module_key: 'photo_delivery',
+        label: 'Photo delivery',
+        description: 'Deliver galleries digitally with a polished client experience.',
+        why_now: 'Delivery quality affects referrals and repeat business.',
       },
     ],
     consultant: [

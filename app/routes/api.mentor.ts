@@ -145,6 +145,29 @@ function hasCountryCode(payload: Record<string, unknown>) {
   return raw.length > 0;
 }
 
+function buildProactiveIntelligenceSection(vertical: Awaited<ReturnType<typeof getVerticalContext>> | null) {
+  if (!vertical) {
+    return '';
+  }
+
+  const opportunities = (vertical.revenueDrivers ?? []).slice(0, 3);
+  const risks = (vertical.failurePatterns ?? []).slice(0, 3);
+
+  if (opportunities.length === 0 && risks.length === 0) {
+    return '';
+  }
+
+  const opportunitiesBlock = opportunities.length
+    ? opportunities.map((item, index) => `${index + 1}. ${item.driver}${item.lever ? ` — ${item.lever}` : ''}`).join('\n')
+    : '1. Inga tydliga möjligheter ännu.';
+
+  const risksBlock = risks.length
+    ? risks.map((item, index) => `${index + 1}. ${item.pattern}${item.fast_fix ? ` — ${item.fast_fix}` : ''}`).join('\n')
+    : '1. Inga tydliga risker ännu.';
+
+  return `🎯 Intelligence för ditt projekt:\n\n**3 möjligheter:**\n${opportunitiesBlock}\n\n**3 risker att undvika:**\n${risksBlock}`;
+}
+
 function normalizeDocumentReadyPayload(payload: Record<string, unknown>) {
   const title = typeof payload.title === 'string' && payload.title.trim().length > 0 ? payload.title.trim() : 'Document';
   const documentType =
@@ -276,7 +299,20 @@ export async function action({ context, request }: ActionFunctionArgs) {
     return Response.json({ error: '[RIDVAN-E852] Brain state not found' }, { status: 404 });
   }
 
-  const vertical = await getVerticalContext({ projectId, userId: user.id }).catch(() => null);
+  const vertical = await getVerticalContext({
+    projectId,
+    userId: user.id,
+    language: request.headers.get('accept-language'),
+    env: context.cloudflare.env,
+  }).catch(() => null);
+
+  const { count: existingAssistantMessagesCount } = await supabaseAdmin
+    .from('mentor_messages')
+    .select('*', { count: 'exact', head: true })
+    .eq('project_id', projectId)
+    .eq('user_id', user.id)
+    .eq('session_id', sessionId)
+    .eq('role', 'assistant');
 
   const [{ data: projectRow }, { data: snapshotRow }] = await Promise.all([
     supabaseAdmin
@@ -428,7 +464,8 @@ ${systemInstruction}` : baseSystem;
       return Response.json({ error: `[RIDVAN-E853] Failed to parse Mentor output: ${messageText}`, raw: finalText }, { status: 500 });
     }
 
-    const reply = parsed.reply;
+    const intelligenceSection = existingAssistantMessagesCount === 0 ? buildProactiveIntelligenceSection(vertical) : '';
+    const reply = intelligenceSection ? `${intelligenceSection}\n\n${parsed.reply}` : parsed.reply;
     const events = parsed.events
       .map((e) => {
         const basePayload = {
@@ -525,9 +562,9 @@ ${systemInstruction}` : baseSystem;
         userId: user.id,
         extra: { stage: 'insert_brain_events', projectId, eventCount: events.length },
       });
-      return Response.json({ error: `[RIDVAN-E854] Failed to write Brain events: ${messageText}`, reply: parsed.reply }, { status: 500 });
+      return Response.json({ error: `[RIDVAN-E854] Failed to write Brain events: ${messageText}`, reply }, { status: 500 });
     }
 
-    return Response.json({ reply: parsed.reply, events, eventsWritten: events.length });
+    return Response.json({ reply, events, eventsWritten: events.length });
   }
 }

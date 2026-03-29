@@ -2,7 +2,7 @@ import { type LoaderFunctionArgs } from '@remix-run/cloudflare';
 import { requireUserFromBearerToken } from '~/lib/brain/auth.server';
 import { getVerticalContext } from '~/lib/vertical/context.server';
 
-export async function loader({ request, params }: LoaderFunctionArgs) {
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
   if (request.method !== 'GET') {
     return Response.json({ error: 'Method Not Allowed' }, { status: 405 });
   }
@@ -13,7 +13,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 
   const { user } = await requireUserFromBearerToken(request);
-  const ctx = await getVerticalContext({ projectId, userId: user.id });
+  const ctx = await getVerticalContext({
+    projectId,
+    userId: user.id,
+    language: request.headers.get('accept-language'),
+    env: context.cloudflare?.env,
+  });
 
   if (!ctx) {
     return Response.json({ error: '[RIDVAN-E922] Brain state not found' }, { status: 404 });

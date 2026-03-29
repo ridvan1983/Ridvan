@@ -103,6 +103,10 @@ export function WorkbenchSupabaseButton() {
   }, [activeProject?.supabaseAnonKey]);
 
   const handleConnectSupabase = useCallback(async () => {
+    if (!projectId) {
+      return;
+    }
+
     if (!session?.access_token) {
       toast.error('You need to be logged in');
       return;
@@ -208,17 +212,15 @@ export function WorkbenchSupabaseButton() {
     }
   }, [loadSupabaseState, session?.access_token]);
 
-  if (!projectId) {
-    return null;
-  }
-
   return (
     <>
       <PanelHeaderButton
         className="mr-1 text-sm"
         onClick={() => {
           setIsOpen(true);
-          void loadSupabaseState();
+          if (projectId) {
+            void loadSupabaseState();
+          }
         }}
       >
         <div className="i-ph:database" />
@@ -235,18 +237,24 @@ export function WorkbenchSupabaseButton() {
           <DialogDescription asChild>
             <div className="space-y-4">
               <p>
-                {isSupabaseConnected
+                {!projectId
+                  ? 'Create or save the project first, then connect Supabase.'
+                  : isSupabaseConnected
                   ? 'Supabase is connected for your account. Choose or create a project to attach to this builder project.'
                   : 'Connect your Supabase account to create or attach a database-backed project with one click.'}
               </p>
               <div className="rounded-md border border-bolt-elements-borderColor p-3 text-sm">
-                <div><strong>Current builder project:</strong> {activeProject?.title ?? projectId}</div>
+                <div><strong>Current builder project:</strong> {activeProject?.title ?? projectId ?? 'Not created yet'}</div>
                 <div><strong>Status:</strong> {supabaseState?.projectConnection?.supabase_connected_at ? 'Connected' : 'Not connected'}</div>
                 {supabaseState?.projectConnection?.supabase_project_url ? (
                   <div><strong>URL:</strong> {supabaseState.projectConnection.supabase_project_url}</div>
                 ) : null}
               </div>
-              {!isSupabaseConnected ? (
+              {!projectId ? (
+                <div className="inline-flex w-fit rounded-lg bg-sky-500/10 px-4 py-2 text-sm font-medium text-sky-300 opacity-60">
+                  Connect Supabase
+                </div>
+              ) : !isSupabaseConnected ? (
                 <DialogButton type="primary" onClick={() => void handleConnectSupabase()}>
                   {isSupabaseConnecting ? 'Connecting...' : 'Connect Supabase'}
                 </DialogButton>

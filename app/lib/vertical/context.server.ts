@@ -1,59 +1,309 @@
+import { createAnthropic } from '@ai-sdk/anthropic';
+import { generateText } from 'ai';
 import { readBrainContext } from '~/lib/brain/read.server';
-import { normalizeIndustry } from './taxonomy.server';
+import { getAPIKey } from '~/lib/.server/llm/api-key';
+import { supabaseAdmin } from '~/lib/supabase/server';
+import { extractGeo, extractIndustryAndGeo, normalizeIndustry } from './taxonomy.server';
 import { getModulesForIndustry } from './modules.server';
 
-export async function getVerticalContext(args: { projectId: string; userId: string }) {
-  const brain = await readBrainContext({ projectId: args.projectId, userId: args.userId });
+type Driver = { driver: string; why: string; lever: string; impact: 'revenue' | 'cost' | 'risk' };
+type Pattern = {
+  pattern: string;
+  symptom: string;
+  root_cause: string;
+  fast_fix: string;
+  impact: 'revenue' | 'cost' | 'risk';
+};
 
-  if (!brain) {
+type ProjectRow = {
+  id: string;
+  title: string | null;
+};
+
+type ProjectChatSessionRow = {
+  id: string;
+  created_at: string;
+  messages: unknown;
+};
+
+function extractJsonObject(raw: string) {
+  const trimmed = raw.trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
+  const start = trimmed.indexOf('{');
+  const end = trimmed.lastIndexOf('}');
+
+  if (start === -1 || end === -1 || end <= start) {
+    throw new Error('[RIDVAN-E1259] Vertical signals response did not contain valid JSON');
+  }
+
+  return trimmed.slice(start, end + 1);
+}
+
+function pickLanguageInstruction(sourceText: string | null, languageHint: string | null | undefined) {
+  const trimmedSource = sourceText?.trim();
+
+  if (trimmedSource) {
+    return `Use the same language as this source text: ${JSON.stringify(trimmedSource)}`;
+  }
+
+  if (languageHint?.trim()) {
+    return `Use this language preference: ${languageHint.trim()}`;
+  }
+
+  return 'Use clear English.';
+}
+
+async function generateLocalizedVerticalSignals(args: {
+  industry: string;
+  geo: string | null;
+  sourceText: string | null;
+  languageHint?: string | null;
+  env?: Env;
+}) {
+  const apiKey = getAPIKey(args.env ?? (((globalThis as any)?.env ?? {}) as Env)) ?? '';
+
+  if (!apiKey || !args.industry || args.industry === 'unknown') {
     return null;
   }
 
-  const industry = brain.industryProfile?.normalizedIndustry ?? 'unknown';
-  const geoCountryCode = brain.geoProfile?.countryCode ?? null;
+  const anthropic = createAnthropic({ apiKey });
+  const prompt = `You are a business advisor.
+For a ${args.industry} business${args.geo ? ` in ${args.geo}` : ''}, list 3 revenue opportunities and 3 risks.
+${pickLanguageInstruction(args.sourceText, args.languageHint)}
+Format: short, concrete, actionable. Include numbers or percentages where relevant. Maximum 1 sentence each.
+Return only valid JSON in this exact shape:
+{
+  "revenueDrivers": [{ "title": string, "description": string }],
+  "risks": [{ "title": string, "description": string }]
+}`;
+
+  const result = await generateText({
+    model: anthropic('claude-sonnet-4-5-20250929'),
+    temperature: 0.2,
+    maxTokens: 500,
+    prompt,
+  });
+
+  const parsed = JSON.parse(extractJsonObject(result.text)) as {
+    revenueDrivers?: Array<{ title?: unknown; description?: unknown }>;
+    risks?: Array<{ title?: unknown; description?: unknown }>;
+  };
+
+  const revenueDrivers = (parsed.revenueDrivers ?? [])
+    .map((item) => {
+      const title = typeof item?.title === 'string' ? item.title.trim() : '';
+      const description = typeof item?.description === 'string' ? item.description.trim() : '';
+
+      if (!title || !description) {
+        return null;
+      }
+
+      return {
+        driver: title,
+        why: description,
+        lever: description,
+        impact: 'revenue' as const,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
+    .slice(0, 3);
+
+  const failurePatterns = (parsed.risks ?? [])
+    .map((item) => {
+      const title = typeof item?.title === 'string' ? item.title.trim() : '';
+      const description = typeof item?.description === 'string' ? item.description.trim() : '';
+
+      if (!title || !description) {
+        return null;
+      }
+
+      return {
+        pattern: title,
+        symptom: description,
+        root_cause: description,
+        fast_fix: description,
+        impact: 'risk' as const,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
+    .slice(0, 3);
+
+  return {
+    revenueDrivers,
+    failurePatterns,
+  };
+}
+
+function findFirstUserMessage(messages: unknown) {
+  if (!Array.isArray(messages)) {
+    return null;
+  }
+
+  for (const message of messages) {
+    if (!message || typeof message !== 'object') {
+      continue;
+    }
+
+    const role = typeof (message as { role?: unknown }).role === 'string' ? (message as { role: string }).role : null;
+    const content = typeof (message as { content?: unknown }).content === 'string' ? (message as { content: string }).content.trim() : null;
+
+    if (role === 'user' && content) {
+      return content;
+    }
+  }
+
+  return null;
+}
+
+async function readProjectContextSources(args: { projectId: string; userId: string }) {
+  const [{ data: projectRow, error: projectError }, { data: sessions, error: sessionsError }] = await Promise.all([
+    supabaseAdmin.from('projects').select('id, title').eq('id', args.projectId).eq('user_id', args.userId).maybeSingle<ProjectRow>(),
+    supabaseAdmin
+      .from('project_chat_sessions')
+      .select('id, created_at, messages')
+      .eq('project_id', args.projectId)
+      .eq('user_id', args.userId)
+      .order('created_at', { ascending: true })
+      .limit(20)
+      .returns<ProjectChatSessionRow[]>(),
+  ]);
+
+  if (projectError) {
+    throw new Error(`[RIDVAN-E1254] Failed to load project fallback data: ${projectError.message}`);
+  }
+
+  if (sessionsError) {
+    throw new Error(`[RIDVAN-E1255] Failed to load project chat session fallback data: ${sessionsError.message}`);
+  }
+
+  let firstUserPrompt: string | null = null;
+
+  for (const session of sessions ?? []) {
+    const candidate = findFirstUserMessage(session.messages);
+
+    if (candidate) {
+      firstUserPrompt = candidate;
+      break;
+    }
+  }
+
+  return {
+    firstUserPrompt,
+    projectTitle: projectRow?.title ?? null,
+  };
+}
+
+function buildFallbackGeoProfile(sourceText: string | null) {
+  const extracted = sourceText ? sourceText.trim() : null;
+  const geoString = extracted || null;
+  const parts = geoString ? geoString.split(',').map((part) => part.trim()).filter(Boolean) : [];
+  return {
+    countryCode: parts[1]?.length === 2 ? parts[1].toUpperCase() : 'SE',
+    country: parts[1] ?? 'Sverige',
+    city: parts[0] ?? null,
+    currencyCode: 'SEK',
+    taxModel: 'vat',
+    languageCodes: ['sv'],
+  };
+}
+
+function buildExpectedBusinessModel(industry: string) {
+  switch (industry) {
+    case 'hair_salon':
+      return 'Service business (time-slot inventory), revenue per appointment + retention.';
+    case 'restaurant':
+      return 'Hospitality business (seat inventory), revenue per cover + turn-time efficiency.';
+    case 'gym':
+      return 'Membership business (recurring), retention and attendance drive LTV.';
+    case 'legal_firm':
+    case 'law_firm':
+      return 'Professional services (time inventory), lead quality and speed-to-response matter.';
+    case 'hotel':
+      return 'Hospitality inventory business, where occupancy, ADR, and direct bookings shape revenue.';
+    case 'clinic':
+      return 'Appointment-based care business, where utilization, trust, and rebooking drive growth.';
+    case 'real_estate':
+      return 'Lead-conversion business, where listing quality and response speed create commissions.';
+    case 'bakery':
+      return 'High-frequency local retail, where repeat purchases, pre-orders, and basket size matter.';
+    case 'beauty':
+      return 'Service and retention business, where recurring visits, premium add-ons, and trust build LTV.';
+    case 'consultant':
+      return 'Expert-service business, where authority, packaging, and sales conversion determine utilization.';
+    case 'school':
+    case 'education':
+      return 'Enrollment business, where cohort fill rate, retention, and student outcomes drive value.';
+    case 'ecommerce':
+    case 'e_commerce':
+      return 'Commerce business, where product discovery, checkout conversion, and repeat purchase drive growth.';
+    case 'food_delivery':
+      return 'Delivery operations business, where order volume, routing efficiency, and repeat customers drive margin.';
+    case 'auto_repair':
+      return 'Workshop service business, where capacity utilization, trust, and repeat maintenance drive revenue.';
+    case 'accounting':
+      return 'Professional recurring-service business, where retention, response speed, and trust protect LTV.';
+    case 'event_planning':
+      return 'Event service business, where conversion, logistics quality, and referrals drive growth.';
+    case 'photography':
+      return 'Creative service business, where trust, proof of quality, and booking conversion drive revenue.';
+    default:
+      return 'Unknown';
+  }
+}
+
+function buildVerticalSignals(industry: string) {
+  const revenueDrivers: Driver[] = [];
+  const failurePatterns: Pattern[] = [];
+
+  return { revenueDrivers, failurePatterns };
+}
+
+export async function getVerticalContext(args: { projectId: string; userId: string; language?: string | null; env?: Env }) {
+  const brain = await readBrainContext({ projectId: args.projectId, userId: args.userId });
+
+  const contextSources = await readProjectContextSources(args);
+  const promptExtraction = contextSources.firstUserPrompt ? await extractIndustryAndGeo(contextSources.firstUserPrompt) : { industry: null, geo: null };
+  const titleExtraction = contextSources.projectTitle ? await extractIndustryAndGeo(contextSources.projectTitle) : { industry: null, geo: null };
+  const promptIndustry = promptExtraction.industry ? normalizeIndustry(promptExtraction.industry) : null;
+  const titleIndustry = titleExtraction.industry ? normalizeIndustry(titleExtraction.industry) : null;
+  const brainIndustry = brain?.industryProfile ?? null;
+  const promptGeoString = promptExtraction.geo ?? (contextSources.firstUserPrompt ? await extractGeo(contextSources.firstUserPrompt) : null);
+  const titleGeoString = titleExtraction.geo ?? (contextSources.projectTitle ? await extractGeo(contextSources.projectTitle) : null);
+  const promptGeo = buildFallbackGeoProfile(promptGeoString);
+  const titleGeo = buildFallbackGeoProfile(titleGeoString);
+  const industry =
+    (promptIndustry && promptIndustry.normalizedIndustry !== 'unknown' ? promptIndustry.normalizedIndustry : null) ??
+    (titleIndustry && titleIndustry.normalizedIndustry !== 'unknown' ? titleIndustry.normalizedIndustry : null) ??
+    brain?.industryProfile?.normalizedIndustry ??
+    'unknown';
+  const geoCountryCode =
+    (promptGeo.countryCode || null) ??
+    (titleGeo.countryCode || null) ??
+    brain?.geoProfile?.countryCode ??
+    'SE';
+  const geoProfile = {
+    ...(brain?.geoProfile ?? {}),
+    ...titleGeo,
+    ...promptGeo,
+    countryCode: promptGeo.countryCode ?? titleGeo.countryCode ?? brain?.geoProfile?.countryCode ?? 'SE',
+    country: promptGeo.country ?? titleGeo.country ?? (brain?.geoProfile as { country?: string | null } | undefined)?.country ?? 'Sverige',
+    city:
+      promptGeo.city ??
+      titleGeo.city ??
+      (brain?.geoProfile as { city?: string | null } | undefined)?.city ??
+      null,
+  };
 
   const modules = getModulesForIndustry(industry as any, geoCountryCode);
 
-  const expectedBusinessModel = (() => {
-    switch (industry) {
-      case 'hair_salon':
-        return 'Service business (time-slot inventory), revenue per appointment + retention.';
-      case 'restaurant':
-        return 'Hospitality business (seat inventory), revenue per cover + turn-time efficiency.';
-      case 'gym':
-        return 'Membership business (recurring), retention and attendance drive LTV.';
-      case 'legal_firm':
-        return 'Professional services (time inventory), lead quality and speed-to-response matter.';
-      case 'hotel':
-        return 'Hospitality inventory business, where occupancy, ADR, and direct bookings shape revenue.';
-      case 'clinic':
-        return 'Appointment-based care business, where utilization, trust, and rebooking drive growth.';
-      case 'real_estate':
-        return 'Lead-conversion business, where listing quality and response speed create commissions.';
-      case 'bakery':
-        return 'High-frequency local retail, where repeat purchases, pre-orders, and basket size matter.';
-      case 'beauty':
-        return 'Service and retention business, where recurring visits, premium add-ons, and trust build LTV.';
-      case 'consultant':
-        return 'Expert-service business, where authority, packaging, and sales conversion determine utilization.';
-      case 'school':
-        return 'Enrollment business, where cohort fill rate, retention, and student outcomes drive value.';
-      default:
-        return 'Unknown';
-    }
-  })();
-
-  type Driver = { driver: string; why: string; lever: string; impact: 'revenue' | 'cost' | 'risk' };
-  type Pattern = {
-    pattern: string;
-    symptom: string;
-    root_cause: string;
-    fast_fix: string;
-    impact: 'revenue' | 'cost' | 'risk';
-  };
-
-  const revenueDrivers: Driver[] = [];
-  const failurePatterns: Pattern[] = [];
+  const expectedBusinessModel = buildExpectedBusinessModel(industry);
+  const { revenueDrivers, failurePatterns } = buildVerticalSignals(industry);
+  const localizedSignals = await generateLocalizedVerticalSignals({
+    industry,
+    geo: [promptGeo.city, titleGeo.city, geoProfile.city, geoProfile.country].filter(Boolean).join(', ') || null,
+    sourceText: contextSources.firstUserPrompt ?? contextSources.projectTitle,
+    languageHint: args.language ?? null,
+    env: args.env,
+  }).catch(() => null);
 
   if (industry === 'hair_salon') {
     revenueDrivers.push(
@@ -461,7 +711,7 @@ export async function getVerticalContext(args: { projectId: string; userId: stri
 
   const insights: Array<{ problem: string; why_it_matters: string; action: string; impact: 'revenue' | 'cost' | 'risk' }> = [];
 
-  const goalSummary = brain.state.primaryGoalSummary;
+  const goalSummary = brain?.state.primaryGoalSummary;
   if (goalSummary) {
     insights.push({
       problem: `Goal set: ${goalSummary}`,
@@ -473,13 +723,26 @@ export async function getVerticalContext(args: { projectId: string; userId: stri
 
   return {
     projectId: args.projectId,
-    industryProfile: brain.industryProfile,
-    geoProfile: brain.geoProfile,
-    state: brain.state,
+    industryProfile: {
+      ...(brainIndustry ?? {}),
+      normalizedIndustry: industry,
+      confidence:
+        (promptIndustry && promptIndustry.normalizedIndustry !== 'unknown' ? promptIndustry.confidence : null) ??
+        (titleIndustry && titleIndustry.normalizedIndustry !== 'unknown' ? titleIndustry.confidence : null) ??
+        brainIndustry?.confidence ??
+        0.4,
+      subIndustry:
+        (promptIndustry && promptIndustry.normalizedIndustry !== 'unknown' ? promptIndustry.subIndustry : null) ??
+        (titleIndustry && titleIndustry.normalizedIndustry !== 'unknown' ? titleIndustry.subIndustry : null) ??
+        brainIndustry?.subIndustry ??
+        null,
+    },
+    geoProfile,
+    state: brain?.state ?? { primaryGoalSummary: null, currentSignals: {} },
     modules,
     expectedBusinessModel,
-    revenueDrivers,
-    failurePatterns,
+    revenueDrivers: localizedSignals?.revenueDrivers?.length ? localizedSignals.revenueDrivers : revenueDrivers,
+    failurePatterns: localizedSignals?.failurePatterns?.length ? localizedSignals.failurePatterns : failurePatterns,
     geoNotes,
     insights,
   };

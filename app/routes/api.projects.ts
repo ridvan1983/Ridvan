@@ -30,6 +30,20 @@ function fallbackProjectName(titleHint: string) {
   const source = titleHint.trim();
   const lower = source.toLowerCase();
 
+  const namedEntityPatterns = [
+    /(?:för|for)\s+([\p{L}\p{N}][\p{L}\p{N}&'’\- ]{1,60})/iu,
+    /(?:som heter|called|named)\s+([\p{L}\p{N}][\p{L}\p{N}&'’\- ]{1,60})/iu,
+  ];
+
+  for (const pattern of namedEntityPatterns) {
+    const match = source.match(pattern);
+    const candidate = match?.[1]?.trim().replace(/[,.!?;:]+$/g, '').trim();
+
+    if (candidate) {
+      return candidate.split(/\s+/).slice(0, 4).join(' ');
+    }
+  }
+
   if (lower.includes('frisör') || lower.includes('salong')) {
     return lower.includes('stockholm') ? 'Stockholms Frisör' : 'Salongen';
   }
@@ -78,26 +92,23 @@ async function generateProjectTitle(rawTitleHint: string, request: Request) {
     const anthropic = createAnthropic({ apiKey });
     const result = await generateText({
       model: anthropic('claude-sonnet-4-5-20250929'),
-      temperature: 0.4,
-      maxTokens: 30,
-      prompt: `Based on this business idea, generate a short, professional business name.
-Rules:
-- Max 3 words
-- Sounds like a real business name, not a description
-- Match the language of the prompt (Swedish prompt = Swedish name)
-- Match the industry and location if mentioned
-- Never use generic words like "App" or "System"
+      temperature: 0,
+      maxTokens: 20,
+      prompt: `Extract a short project name (2-4 words max) from this description.
+Return ONLY the name, nothing else.
 
 Examples:
-- "frisörsalong i stockholm" → "Atelier Nord"
-- "pizzeria i göteborg" → "Pizzeria Napoli"
-- "gym i malmö" → "Malmö Fitness"
-- "todo app" → "TaskFlow"
-- "bokningssystem för tandläkare" → "DentBook"
+- "Bygg en restauranghemsida för Mama Rosa i Stockholm" → "Mama Rosa"
+- "Build a todo app with React" → "Todo App"
+- "Skapa en e-handel för barnkläder som heter KidStyle" → "KidStyle"
 
-Business idea: "${titleHint}"
+Rules:
+- Prefer the explicit business or product name if one exists
+- Do not return a full sentence
+- Do not include words like "Bygg", "Skapa", "Build", "Create"
+- Keep it short and readable
 
-Respond with ONLY the business name, nothing else.`,
+Description: ${JSON.stringify(titleHint)}`,
     });
 
     const cleaned = cleanGeneratedName(result.text);
