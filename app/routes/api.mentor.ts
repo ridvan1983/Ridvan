@@ -12,6 +12,7 @@ import { deductCredit } from '~/lib/credits/deduct';
 import { analyzeMentorAttachments, buildAttachmentPromptContext, type MentorAttachmentReference } from '~/lib/mentor/file-analysis.server';
 import { buildMentorSystemPrompt } from '~/lib/mentor/prompt.server';
 import { parseMentorJson } from '~/lib/mentor/parse.server';
+import { checkRateLimit, mentorRateLimit } from '~/lib/security/distributed-rate-limit.server';
 import { captureError } from '~/lib/server/monitoring.server';
 import { supabaseAdmin } from '~/lib/supabase/server';
 import { getVerticalContext } from '~/lib/vertical/context.server';
@@ -202,6 +203,18 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
   if (!projectId || !message || !sessionId) {
     return Response.json({ error: '[RIDVAN-E851] Missing projectId or message' }, { status: 400 });
+  }
+
+  const { success: mentorRateLimitSuccess, reset: mentorRateLimitReset } = await checkRateLimit(mentorRateLimit, user.id);
+
+  if (!mentorRateLimitSuccess) {
+    return Response.json(
+      { error: 'Too many requests. Please wait before trying again.' },
+      {
+        status: 429,
+        headers: { 'Retry-After': String(Math.ceil((mentorRateLimitReset - Date.now()) / 1000)) },
+      },
+    );
   }
 
   // Monetization gate (Mentor-only): Free plan = max 3 conversation sessions per month.

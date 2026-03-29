@@ -24,6 +24,12 @@ export const authRateLimit = new Ratelimit({
   prefix: 'ridvan:auth',
 });
 
+export const deployRateLimit = new Ratelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(5, '1 m'),
+  prefix: 'ridvan:deploy',
+});
+
 export async function checkRateLimit(
   limiter: Ratelimit,
   identifier: string,

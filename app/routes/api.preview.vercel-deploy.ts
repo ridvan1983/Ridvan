@@ -1,4 +1,5 @@
 import { type ActionFunctionArgs } from '@remix-run/cloudflare';
+import { checkRateLimit, deployRateLimit } from '~/lib/security/distributed-rate-limit.server';
 import { captureError } from '~/lib/server/monitoring.server';
 import { supabaseAdmin } from '~/lib/supabase/server';
 
@@ -224,6 +225,18 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
   if (!projectId) {
     return Response.json({ error: '[RIDVAN-E1934] Missing project id' }, { status: 400 });
+  }
+
+  const { success: deployRateLimitSuccess, reset: deployRateLimitReset } = await checkRateLimit(deployRateLimit, user.id);
+
+  if (!deployRateLimitSuccess) {
+    return Response.json(
+      { error: 'Too many requests. Please wait before trying again.' },
+      {
+        status: 429,
+        headers: { 'Retry-After': String(Math.ceil((deployRateLimitReset - Date.now()) / 1000)) },
+      },
+    );
   }
 
   const project = await requireOwnedProject(projectId, user.id);

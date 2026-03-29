@@ -24,6 +24,17 @@ export function LoginPage() {
     setIsSubmitting(true);
 
     try {
+      const rateLimitResponse = await fetch('/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, mode }),
+      });
+
+      if (!rateLimitResponse.ok) {
+        const payload = (await rateLimitResponse.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error ?? '[RIDVAN-E1223] Authentication rate limit failed');
+      }
+
       if (mode === 'login') {
         await signIn(email, password);
       } else {
