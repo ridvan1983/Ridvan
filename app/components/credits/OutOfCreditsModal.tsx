@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { toast } from 'react-toastify';
+import { PAID_PLAN_CHECKOUT_DISPLAY, type PaidPlanId } from '~/config/paid-plans';
 import { useAuth } from '~/lib/auth/AuthContext';
 
 interface OutOfCreditsModalProps {
@@ -6,21 +8,15 @@ interface OutOfCreditsModalProps {
   onClose: () => void;
 }
 
-const PLANS = [
-  { id: 'starter', name: 'Starter', price: '€19', monthlyCredits: 100 },
-  { id: 'pro', name: 'Pro', price: '€49', monthlyCredits: 300 },
-  { id: 'business', name: 'Business', price: '€99', monthlyCredits: 800 },
-] as const;
-
 export default function OutOfCreditsModal({ isOpen, onClose }: OutOfCreditsModalProps) {
   const { session } = useAuth();
-  const [loadingPlanId, setLoadingPlanId] = useState<string | null>(null);
+  const [loadingPlanId, setLoadingPlanId] = useState<PaidPlanId | null>(null);
 
   if (!isOpen) {
     return null;
   }
 
-  const startCheckout = async (planId: string) => {
+  const startCheckout = async (planId: PaidPlanId) => {
     if (!session?.access_token || loadingPlanId) {
       return;
     }
@@ -37,16 +33,26 @@ export default function OutOfCreditsModal({ isOpen, onClose }: OutOfCreditsModal
         body: JSON.stringify({ planId }),
       });
 
+      const payload = (await response.json().catch(() => null)) as { url?: string; error?: string } | null;
+
       if (!response.ok) {
-        throw new Error('Failed to create checkout session');
+        const message =
+          payload && typeof payload.error === 'string' ? payload.error : '[RIDVAN-E408] Failed to create checkout session';
+        toast.error(message);
+        return;
       }
 
-      const payload = (await response.json()) as { url?: string };
-
-      if (payload.url) {
-        window.location.href = payload.url;
+      if (payload?.url) {
+        onClose();
+        window.location.assign(payload.url);
+        return;
       }
-    } catch {
+
+      toast.error('[RIDVAN-E409] Checkout started but no redirect URL was returned');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '[RIDVAN-E408] Failed to create checkout session';
+      toast.error(message);
+    } finally {
       setLoadingPlanId(null);
     }
   };
@@ -63,11 +69,11 @@ export default function OutOfCreditsModal({ isOpen, onClose }: OutOfCreditsModal
         <p className="mt-2 text-sm text-gray-600">Upgrade your plan to keep building</p>
 
         <div className="mt-6 grid gap-3 sm:grid-cols-3">
-          {PLANS.map((plan) => (
+          {PAID_PLAN_CHECKOUT_DISPLAY.map((plan) => (
             <div key={plan.id} className="rounded-lg border border-gray-200 p-4 flex flex-col gap-3">
               <div>
                 <div className="text-sm font-medium text-gray-900">{plan.name}</div>
-                <div className="mt-1 text-2xl font-semibold text-gray-900">{plan.price}</div>
+                <div className="mt-1 text-2xl font-semibold text-gray-900">{plan.priceLabel}</div>
                 <div className="mt-1 text-xs text-gray-500">{plan.monthlyCredits} monthly credits</div>
               </div>
               <button

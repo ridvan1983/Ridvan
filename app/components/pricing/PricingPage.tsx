@@ -1,47 +1,17 @@
 import { useNavigate } from '@remix-run/react';
 import { useState } from 'react';
 import { brand } from '~/config/brand';
+import { PAID_PLAN_CHECKOUT_DISPLAY, type PaidPlanId } from '~/config/paid-plans';
 import { useAuth } from '~/lib/auth/AuthContext';
 
-type PaidPlanId = 'starter' | 'pro' | 'business';
-
-interface PaidPlan {
-  id: PaidPlanId;
-  name: string;
-  price: string;
-  monthlyCredits: string;
-  dailyBonus: string;
-  rollover: string;
-  popular?: boolean;
-}
-
-const paidPlans: PaidPlan[] = [
-  {
-    id: 'starter',
-    name: 'Starter',
-    price: '€19/month',
-    monthlyCredits: '100 monthly credits',
-    dailyBonus: '+5 daily bonus credits',
-    rollover: '20% rollover',
-  },
-  {
-    id: 'pro',
-    name: 'Pro',
-    price: '€49/month',
-    monthlyCredits: '300 monthly credits',
-    dailyBonus: '+5 daily bonus credits',
-    rollover: '20% rollover',
-    popular: true,
-  },
-  {
-    id: 'business',
-    name: 'Business',
-    price: '€99/month',
-    monthlyCredits: '800 monthly credits',
-    dailyBonus: '+5 daily bonus credits',
-    rollover: '25% rollover',
-  },
-];
+const paidPlans = PAID_PLAN_CHECKOUT_DISPLAY.map((plan) => ({
+  ...plan,
+  price: `${plan.priceLabel}/month`,
+  monthlyCredits: `${plan.monthlyCredits} monthly credits`,
+  dailyBonus: '+5 daily bonus credits',
+  rollover: plan.id === 'business' ? '25% rollover' : '20% rollover',
+  popular: plan.id === 'pro',
+}));
 
 export function PricingPage() {
   const navigate = useNavigate();
