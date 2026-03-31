@@ -1,4 +1,5 @@
 import { type ActionFunctionArgs, type LoaderFunctionArgs, redirect } from '@remix-run/cloudflare';
+import { getCloudflareEnv } from '~/lib/env.server';
 import {
   buildSupabaseOauthUrl,
   exchangeSupabaseOauthCode,
@@ -80,7 +81,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     return Response.json({ ok: true });
   }
 
-  const cloudflareEnv = context.cloudflare?.env as { SUPABASE_CLIENT_ID?: string; SUPABASE_CLIENT_SECRET?: string } | undefined;
+  const cloudflareEnv = getCloudflareEnv(context);
   const { clientId, clientSecret } = requireSupabaseOauthEnv(cloudflareEnv);
   const body = (await request.json().catch(() => null)) as { projectId?: string; returnTo?: string } | null;
   const resolvedUserId = await resolveSupabaseIntegrationUserId(user.id, body?.projectId?.trim() || null);

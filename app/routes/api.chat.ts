@@ -5,11 +5,12 @@ import { MAX_RESPONSE_SEGMENTS, MAX_TOKENS } from '~/lib/.server/llm/constants';
 import { CONTINUE_PROMPT } from '~/lib/.server/llm/prompts';
 import { streamText, type Messages, type StreamingOptions } from '~/lib/.server/llm/stream-text';
 import SwitchableStream from '~/lib/.server/llm/switchable-stream';
+import { getOptionalServerEnv } from '~/lib/env.server';
 import { chatRateLimiter } from '~/lib/security/rate-limiter';
 import { supabaseAdmin } from '~/lib/supabase/server';
 
 const OVERLOAD_RETRY_DELAYS_MS = [0, 250, 750] as const;
-const DEBUG = process.env.RIDVAN_DEBUG_CHAT === '1';
+const DEBUG = getOptionalServerEnv('RIDVAN_DEBUG_CHAT') === '1';
 
 export async function action(args: ActionFunctionArgs) {
   return chatAction(args);
@@ -40,9 +41,11 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
     console.log('[RIDVAN DEBUG][api.chat] action:start', { method: request.method, url: request.url, ts: Date.now() });
   }
 
+  const processApiKey = getOptionalServerEnv('ANTHROPIC_API_KEY');
+
   console.log('[RIDVAN DEBUG] ENV CHECK:', {
-    hasApiKey: !!process.env.ANTHROPIC_API_KEY,
-    keyPrefix: process.env.ANTHROPIC_API_KEY?.substring(0, 15),
+    hasApiKey: !!processApiKey,
+    keyPrefix: processApiKey?.substring(0, 15),
     envSource: 'process.env',
   });
   console.log('[RIDVAN DEBUG] CF ENV CHECK:', {

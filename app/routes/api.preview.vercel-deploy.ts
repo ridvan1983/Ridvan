@@ -1,4 +1,5 @@
 import { type ActionFunctionArgs } from '@remix-run/cloudflare';
+import { getOptionalServerEnv } from '~/lib/env.server';
 import { checkRateLimit, deployRateLimit } from '~/lib/security/distributed-rate-limit.server';
 import { captureError } from '~/lib/server/monitoring.server';
 import { supabaseAdmin } from '~/lib/supabase/server';
@@ -187,10 +188,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
     return Response.json({ error: 'Method Not Allowed' }, { status: 405 });
   }
 
-  const cloudflareEnv = context.cloudflare?.env as { VERCEL_TOKEN?: string } | undefined;
   console.log('1. Endpoint called');
 
-  const vercelToken = cloudflareEnv?.VERCEL_TOKEN ?? process.env.VERCEL_TOKEN;
+  const vercelToken = getOptionalServerEnv('VERCEL_TOKEN', context.cloudflare?.env);
 
   console.log('2. VERCEL_TOKEN exists:', !!vercelToken);
 

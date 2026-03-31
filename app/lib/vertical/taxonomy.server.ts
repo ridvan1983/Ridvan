@@ -155,7 +155,7 @@ function parseGeoHint(text: string) {
 }
 
 async function runAiExtraction(prompt: string) {
-  const apiKey = getAPIKey(((globalThis as any)?.env ?? {}) as Env) ?? '';
+  const apiKey = getAPIKey() ?? '';
 
   if (!apiKey) {
     return null;

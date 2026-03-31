@@ -2,6 +2,7 @@ import { type ActionFunctionArgs, type LoaderFunctionArgs } from '@remix-run/clo
 import { generateText } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { getAPIKey } from '~/lib/.server/llm/api-key';
+import { getRequestCloudflareEnv } from '~/lib/env.server';
 import { supabaseAdmin } from '~/lib/supabase/server';
 
 interface ProjectRow {
@@ -84,7 +85,7 @@ async function generateProjectTitle(rawTitleHint: string, request: Request) {
   }
 
   try {
-    const apiKey = getAPIKey((request as any).cf?.env ?? (globalThis as any)?.env ?? undefined);
+    const apiKey = getAPIKey(getRequestCloudflareEnv(request));
     if (!apiKey) {
       return fallbackProjectName(titleHint);
     }

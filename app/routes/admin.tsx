@@ -1,6 +1,7 @@
 import { redirect, type ActionFunctionArgs, type LoaderFunctionArgs } from '@remix-run/cloudflare';
 import { Form, useFetcher, useLoaderData, useSearchParams } from '@remix-run/react';
 import { useMemo, useState } from 'react';
+import { getOptionalServerEnv } from '~/lib/env.server';
 import { getUserCreditHistory, type CreditLedgerEntry } from '~/lib/credits/ledger.server';
 import { supabaseAdmin } from '~/lib/supabase/server';
 
@@ -70,8 +71,7 @@ const ADMIN_COOKIE = 'ridvan_admin_auth';
 const ADMIN_SESSION_VALUE = 'true';
 
 function getAdminSecret(context: LoaderFunctionArgs['context'] | ActionFunctionArgs['context']) {
-  const cloudflareEnv = (context.cloudflare?.env ?? undefined) as unknown as Record<string, string | undefined> | undefined;
-  return cloudflareEnv?.ADMIN_SECRET ?? process.env.ADMIN_SECRET;
+  return getOptionalServerEnv('ADMIN_SECRET', context.cloudflare?.env);
 }
 
 function parseCookies(request: Request) {

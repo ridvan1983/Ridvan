@@ -1,5 +1,6 @@
 import { type ActionFunctionArgs } from '@remix-run/cloudflare';
 import { createZip } from '~/lib/deploy/zip.server';
+import { getOptionalServerEnv } from '~/lib/env.server';
 import { supabaseAdmin } from '~/lib/supabase/server';
 
 const NETLIFY_API_URL = 'https://api.netlify.com/api/v1';
@@ -190,8 +191,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     return Response.json({ error: 'Method Not Allowed' }, { status: 405 });
   }
 
-  const cloudflareEnv = context.cloudflare?.env as { NETLIFY_TOKEN?: string } | undefined;
-  const netlifyToken = cloudflareEnv?.NETLIFY_TOKEN ?? process.env.NETLIFY_TOKEN;
+  const netlifyToken = getOptionalServerEnv('NETLIFY_TOKEN', context.cloudflare?.env);
 
   if (!netlifyToken) {
     return Response.json({ error: '[RIDVAN-E1964] Missing NETLIFY_TOKEN environment variable', provider: 'netlify' }, { status: 500 });

@@ -1,6 +1,7 @@
 import { type ActionFunctionArgs } from '@remix-run/cloudflare';
 import Stripe from 'stripe';
 import { isEventProcessed, markEventFailed, markEventProcessed } from '~/lib/billing/webhook-events.server';
+import { getOptionalServerEnv } from '~/lib/env.server';
 import { captureError } from '~/lib/server/monitoring.server';
 import { PLANS, stripe } from '~/lib/stripe/config';
 import { supabaseAdmin } from '~/lib/supabase/server';
@@ -11,7 +12,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   }
 
   const signature = request.headers.get('stripe-signature');
-  const secret = (context.cloudflare?.env as any)?.STRIPE_WEBHOOK_SECRET || process.env.STRIPE_WEBHOOK_SECRET;
+  const secret = getOptionalServerEnv('STRIPE_WEBHOOK_SECRET', context.cloudflare?.env);
 
   if (!signature || !secret) {
     return Response.json({ error: '[RIDVAN-E404] Webhook signature verification failed' }, { status: 400 });

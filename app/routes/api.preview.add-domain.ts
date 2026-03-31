@@ -1,4 +1,5 @@
 import { type ActionFunctionArgs } from '@remix-run/cloudflare';
+import { getOptionalServerEnv } from '~/lib/env.server';
 import { supabaseAdmin } from '~/lib/supabase/server';
 
 const VERCEL_PROJECT_DOMAIN_API_URL = 'https://api.vercel.com/v10/projects';
@@ -41,8 +42,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     return Response.json({ error: 'Method Not Allowed' }, { status: 405 });
   }
 
-  const cloudflareEnv = context.cloudflare?.env as { VERCEL_TOKEN?: string } | undefined;
-  const vercelToken = cloudflareEnv?.VERCEL_TOKEN ?? process.env.VERCEL_TOKEN;
+  const vercelToken = getOptionalServerEnv('VERCEL_TOKEN', context.cloudflare?.env);
 
   if (!vercelToken) {
     return Response.json({ error: '[RIDVAN-E1943] Missing VERCEL_TOKEN environment variable' }, { status: 500 });

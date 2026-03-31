@@ -1,4 +1,5 @@
 import { type LoaderFunctionArgs, redirect } from '@remix-run/cloudflare';
+import { getCloudflareEnv } from '~/lib/env.server';
 import {
   exchangeSupabaseOauthCode,
   requireSupabaseOauthEnv,
@@ -13,7 +14,7 @@ function getOrigin(request: Request) {
 }
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
-  const cloudflareEnv = context.cloudflare?.env as { SUPABASE_CLIENT_ID?: string; SUPABASE_CLIENT_SECRET?: string } | undefined;
+  const cloudflareEnv = getCloudflareEnv(context);
   const { clientId, clientSecret } = requireSupabaseOauthEnv(cloudflareEnv);
   const url = new URL(request.url);
   const code = url.searchParams.get('code');

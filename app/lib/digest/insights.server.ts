@@ -179,7 +179,7 @@ export async function buildWeeklyDigestInsights(args: { projectId: string; userI
 
   const businessName = analysis.businessName || analysis.whatTheySell[0] || 'Ridvan project';
   const weekLabel = isoWeekLabel();
-  const apiKey = getAPIKey(args.env ?? ((globalThis as any)?.env ?? undefined));
+  const apiKey = getAPIKey(args.env);
 
   if (!apiKey) {
     return {

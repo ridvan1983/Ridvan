@@ -1,5 +1,6 @@
 import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
+import { pickServerEnv } from '~/lib/env.server';
 
 type DistributedRateLimitConfig = {
   limit: number;
@@ -10,16 +11,11 @@ type DistributedRateLimitConfig = {
 const ratelimitCache = new Map<string, Ratelimit>();
 
 function getRedisEnv(env?: unknown) {
-  const envRecord = (env ?? null) as
-    | {
-        UPSTASH_REDIS_REST_URL?: string;
-        UPSTASH_REDIS_REST_TOKEN?: string;
-      }
-    | null;
+  const values = pickServerEnv(['UPSTASH_REDIS_REST_URL', 'UPSTASH_REDIS_REST_TOKEN'] as const, env);
 
   return {
-    url: envRecord?.UPSTASH_REDIS_REST_URL || process.env.UPSTASH_REDIS_REST_URL,
-    token: envRecord?.UPSTASH_REDIS_REST_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN,
+    url: values.UPSTASH_REDIS_REST_URL,
+    token: values.UPSTASH_REDIS_REST_TOKEN,
   };
 }
 

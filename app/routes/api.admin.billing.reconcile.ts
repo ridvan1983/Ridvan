@@ -1,5 +1,6 @@
 import { type LoaderFunctionArgs } from '@remix-run/cloudflare';
 import { reconcileSubscriptions } from '~/lib/billing/reconciliation.server';
+import { getOptionalServerEnv } from '~/lib/env.server';
 
 function requireAdminSecret(request: Request, adminSecret: string | undefined) {
   const authHeader = request.headers.get('authorization');
@@ -15,8 +16,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return Response.json({ error: 'Method Not Allowed' }, { status: 405 });
   }
 
-  const cloudflareEnv = (context.cloudflare?.env ?? undefined) as unknown as Record<string, string | undefined> | undefined;
-  const adminSecret = cloudflareEnv?.ADMIN_SECRET ?? process.env.ADMIN_SECRET;
+  const adminSecret = getOptionalServerEnv('ADMIN_SECRET', context.cloudflare?.env);
   requireAdminSecret(request, adminSecret);
 
   const result = await reconcileSubscriptions();

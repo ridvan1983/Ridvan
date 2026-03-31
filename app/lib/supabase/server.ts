@@ -1,11 +1,23 @@
 // ALDRIG importera denna fil i frontend-kod
-import { createClient } from '@supabase/supabase-js'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import { requireServerEnv } from '~/lib/env.server'
 
-const supabaseUrl = process.env.VITE_SUPABASE_URL
-const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+let cachedSupabaseAdmin: SupabaseClient | null = null
 
-if (!supabaseUrl || !serviceRoleKey) {
-  throw new Error('[RIDVAN-E002] Missing server Supabase env vars')
+function getSupabaseAdminClient() {
+  if (cachedSupabaseAdmin) {
+    return cachedSupabaseAdmin
+  }
+
+  const supabaseUrl = requireServerEnv('VITE_SUPABASE_URL', undefined, '[RIDVAN-E002] Missing server Supabase env var:')
+  const serviceRoleKey = requireServerEnv('SUPABASE_SERVICE_ROLE_KEY', undefined, '[RIDVAN-E002] Missing server Supabase env var:')
+
+  cachedSupabaseAdmin = createClient(supabaseUrl, serviceRoleKey)
+  return cachedSupabaseAdmin
 }
 
-export const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey)
+export const supabaseAdmin = new Proxy({} as SupabaseClient, {
+  get(_target, prop, receiver) {
+    return Reflect.get(getSupabaseAdminClient(), prop, receiver)
+  },
+})

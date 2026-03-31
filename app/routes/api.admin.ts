@@ -1,5 +1,6 @@
 import { type LoaderFunctionArgs } from '@remix-run/cloudflare';
 import { getUserCreditHistory } from '~/lib/credits/ledger.server';
+import { getOptionalServerEnv } from '~/lib/env.server';
 import { supabaseAdmin } from '~/lib/supabase/server';
 
 type SubscriptionRow = {
@@ -81,8 +82,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return Response.json({ error: 'Method Not Allowed' }, { status: 405 });
   }
 
-  const cloudflareEnv = (context.cloudflare?.env ?? undefined) as unknown as Record<string, string | undefined> | undefined;
-  const adminSecret = cloudflareEnv?.ADMIN_SECRET ?? process.env.ADMIN_SECRET;
+  const adminSecret = getOptionalServerEnv('ADMIN_SECRET', context.cloudflare?.env);
   requireAdminSecret(request, adminSecret);
 
   const url = new URL(request.url);

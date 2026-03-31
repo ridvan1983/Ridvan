@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '~/lib/supabase/server';
+import { pickServerEnv } from '~/lib/env.server';
 
 const SUPABASE_MANAGEMENT_API_URL = 'https://api.supabase.com/v1';
 const SUPABASE_OAUTH_API_URL = 'https://api.supabase.com/v1/oauth';
@@ -105,14 +106,15 @@ export async function verifySupabaseOauthState(state: string, secret: string) {
   }
 }
 
-function getOauthEnv(env: CloudflareEnvWithSupabaseOauth | undefined) {
-  const clientId = env?.SUPABASE_CLIENT_ID ?? process.env.SUPABASE_CLIENT_ID;
-  const clientSecret = env?.SUPABASE_CLIENT_SECRET ?? process.env.SUPABASE_CLIENT_SECRET;
+function getOauthEnv(env?: unknown) {
+  const values = pickServerEnv(['SUPABASE_CLIENT_ID', 'SUPABASE_CLIENT_SECRET'] as const, env);
+  const clientId = values.SUPABASE_CLIENT_ID;
+  const clientSecret = values.SUPABASE_CLIENT_SECRET;
 
   return { clientId, clientSecret };
 }
 
-export function requireSupabaseOauthEnv(env: CloudflareEnvWithSupabaseOauth | undefined) {
+export function requireSupabaseOauthEnv(env?: unknown) {
   const { clientId, clientSecret } = getOauthEnv(env);
 
   if (!clientId || !clientSecret) {

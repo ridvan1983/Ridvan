@@ -1,13 +1,25 @@
 import Stripe from 'stripe';
+import { requireServerEnv } from '~/lib/env.server';
 
-const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+let cachedStripe: Stripe | null = null;
 
-if (!stripeSecretKey) {
-  throw new Error('[RIDVAN-E010] Missing STRIPE_SECRET_KEY');
+function getStripeClient() {
+  if (cachedStripe) {
+    return cachedStripe;
+  }
+
+  const stripeSecretKey = requireServerEnv('STRIPE_SECRET_KEY', undefined, '[RIDVAN-E010] Missing required environment variable');
+  cachedStripe = new Stripe(stripeSecretKey, {
+    apiVersion: '2024-12-18.acacia' as Stripe.LatestApiVersion,
+  });
+
+  return cachedStripe;
 }
 
-export const stripe = new Stripe(stripeSecretKey, {
-  apiVersion: '2024-12-18.acacia' as Stripe.LatestApiVersion,
+export const stripe = new Proxy({} as Stripe, {
+  get(_target, prop, receiver) {
+    return Reflect.get(getStripeClient(), prop, receiver);
+  },
 });
 
 export const PLANS = {

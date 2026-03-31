@@ -1,6 +1,7 @@
 import { type ActionFunctionArgs } from '@remix-run/cloudflare';
 import Stripe from 'stripe';
 import { markEventFailed, markEventProcessed } from '~/lib/billing/webhook-events.server';
+import { getOptionalServerEnv } from '~/lib/env.server';
 import { captureError } from '~/lib/server/monitoring.server';
 import { PLANS, stripe } from '~/lib/stripe/config';
 import { supabaseAdmin } from '~/lib/supabase/server';
@@ -28,8 +29,7 @@ function parseCookies(request: Request) {
 }
 
 function getAdminSecret(context: ActionFunctionArgs['context']) {
-  const cloudflareEnv = (context.cloudflare?.env ?? undefined) as unknown as Record<string, string | undefined> | undefined;
-  return cloudflareEnv?.ADMIN_SECRET ?? process.env.ADMIN_SECRET;
+  return getOptionalServerEnv('ADMIN_SECRET', context.cloudflare?.env);
 }
 
 function requireAdmin(request: Request, adminSecret: string | undefined) {

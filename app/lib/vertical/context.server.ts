@@ -59,7 +59,7 @@ async function generateLocalizedVerticalSignals(args: {
   languageHint?: string | null;
   env?: Env;
 }) {
-  const apiKey = getAPIKey(args.env ?? (((globalThis as any)?.env ?? {}) as Env)) ?? '';
+  const apiKey = getAPIKey(args.env) ?? '';
 
   if (!apiKey || !args.industry || args.industry === 'unknown') {
     return null;
