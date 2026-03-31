@@ -227,7 +227,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
     return Response.json({ error: '[RIDVAN-E1934] Missing project id' }, { status: 400 });
   }
 
-  const { success: deployRateLimitSuccess, reset: deployRateLimitReset } = await checkRateLimit(deployRateLimit, user.id);
+  const { success: deployRateLimitSuccess, reset: deployRateLimitReset } = await checkRateLimit(
+    deployRateLimit,
+    user.id,
+    context.cloudflare.env,
+  );
 
   if (!deployRateLimitSuccess) {
     return Response.json(

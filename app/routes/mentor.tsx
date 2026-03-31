@@ -1,4 +1,5 @@
 import { json, type MetaFunction } from '@remix-run/cloudflare';
+import { useNavigate } from '@remix-run/react';
 import { Header } from '~/components/header/Header';
 import { useAuth } from '~/lib/auth/AuthContext';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -95,6 +96,7 @@ function healthStatusSurface(status: MentorHealthAnalysisMetric['status']) {
 export default function MentorRoute() {
   const { session } = useAuth();
   const accessToken = session?.access_token ?? null;
+  const navigate = useNavigate();
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -132,6 +134,8 @@ export default function MentorRoute() {
   const [isAutoIntroLoading, setIsAutoIntroLoading] = useState(false);
   const [hasLoadedMentorMessages, setHasLoadedMentorMessages] = useState(false);
   const [hasStoredMentorMessages, setHasStoredMentorMessages] = useState(false);
+  const [implementingMessageId, setImplementingMessageId] = useState<string | null>(null);
+  const [implementedMessageId, setImplementedMessageId] = useState<string | null>(null);
 
   const autoIntroAttemptedRef = useRef<Set<string>>(new Set());
 
@@ -918,6 +922,24 @@ Håll det under 150 ord. Direkt och konkret. Aldrig generiskt.`;
     setIsHealthOpen(false);
   };
 
+  const onImplementRecommendation = (prompt: string, messageId: string) => {
+    if (!selectedProjectId || !prompt.trim()) {
+      return;
+    }
+
+    setImplementingMessageId(messageId);
+    setImplementedMessageId(null);
+
+    window.setTimeout(() => {
+      setImplementingMessageId(null);
+      setImplementedMessageId(messageId);
+      navigate(`/chat?projectId=${encodeURIComponent(selectedProjectId)}&prompt=${encodeURIComponent(prompt)}`);
+      window.setTimeout(() => {
+        setImplementedMessageId((current) => (current === messageId ? null : current));
+      }, 2500);
+    }, 350);
+  };
+
   return (
     <div className="flex flex-col h-full w-full">
       <Header />
@@ -1039,6 +1061,9 @@ Håll det under 150 ord. Direkt och konkret. Aldrig generiskt.`;
               messages={messages}
               isTyping={isThinking || isAutoIntroLoading}
               typingText={isAutoIntroLoading ? 'Mentor analyserar ditt projekt...' : thinkingText}
+              onImplement={onImplementRecommendation}
+              implementingMessageId={implementingMessageId}
+              implementedMessageId={implementedMessageId}
             />
 
             <input

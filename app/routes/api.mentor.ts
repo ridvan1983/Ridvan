@@ -16,9 +16,18 @@ import { checkRateLimit, mentorRateLimit } from '~/lib/security/distributed-rate
 import { captureError } from '~/lib/server/monitoring.server';
 import { supabaseAdmin } from '~/lib/supabase/server';
 import { getVerticalContext } from '~/lib/vertical/context.server';
+import type { BrainMemoryEntry, BrainProjectState } from '~/lib/brain/types';
 
 type SubscriptionRow = {
   plan: string | null;
+};
+
+type MentorMessageRow = {
+  id: string;
+  session_id: string | null;
+  role: 'user' | 'mentor' | 'assistant';
+  content: string;
+  created_at: string;
 };
 
 function noCreditsResponse() {
@@ -168,6 +177,191 @@ function buildProactiveIntelligenceSection(vertical: Awaited<ReturnType<typeof g
   return `🎯 Intelligence för ditt projekt:\n\n**3 möjligheter:**\n${opportunitiesBlock}\n\n**3 risker att undvika:**\n${risksBlock}`;
 }
 
+function stripImplementationMarker(input: string) {
+  return input.replace(/\[data-implement="true"[\s\S]*?\]$/m, '').trim();
+}
+
+function pickUserLanguage(message: string, acceptLanguage: string | null) {
+  const lower = message.toLowerCase();
+  const swedishSignals = [' jag ', ' du ', ' det ', ' och ', ' inte ', ' ska ', 'bolag', 'företag', 'kund'];
+  if (swedishSignals.some((signal) => lower.includes(signal.trim()) || lower.includes(signal))) {
+    return 'svenska';
+  }
+
+  if ((acceptLanguage ?? '').toLowerCase().includes('sv')) {
+    return 'svenska';
+  }
+
+  return 'english';
+}
+
+function summarizeProjectStatus(args: {
+  projectTitle: string | null;
+  snapshotSummary: {
+    version: number | null;
+    createdAt: string | null;
+    title: string | null;
+    totalFiles: number;
+    sampleFiles: string[];
+  } | null;
+  brainState: BrainProjectState;
+}) {
+  const statusParts = [
+    args.projectTitle ? `projektnamn ${args.projectTitle}` : null,
+    args.brainState.currentStage ? `nuvarande fas ${args.brainState.currentStage}` : null,
+    args.brainState.currentBusinessModel ? `affärsmodell ${args.brainState.currentBusinessModel}` : null,
+    args.brainState.primaryGoalSummary ? `huvudmål ${args.brainState.primaryGoalSummary}` : null,
+    args.brainState.topPrioritySummary ? `högsta prioritet ${args.brainState.topPrioritySummary}` : null,
+    args.brainState.mainChallengeSummary ? `största utmaning ${args.brainState.mainChallengeSummary}` : null,
+    args.snapshotSummary ? `senaste snapshot version ${args.snapshotSummary.version ?? 'okänd'} med ${args.snapshotSummary.totalFiles} filer` : null,
+  ].filter((value): value is string => Boolean(value));
+
+  return statusParts.length > 0 ? statusParts.join(' · ') : 'projektet är nytt och fortfarande i ett tidigt skede';
+}
+
+function buildConversationMemory(messages: MentorMessageRow[]) {
+  const cleaned = messages
+    .map((message) => ({
+      ...message,
+      content: stripImplementationMarker(message.content).replace(/\s+/g, ' ').trim(),
+    }))
+    .filter((message) => message.content.length > 0);
+
+  const latestTenSummary = cleaned
+    .slice(-10)
+    .map((message) => `${message.role === 'user' ? 'Användaren' : 'Mentor'}: ${message.content.slice(0, 220)}`)
+    .join('\n');
+
+  const sessionIdsNewestFirst = Array.from(
+    new Set(
+      cleaned
+        .slice()
+        .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
+        .map((message) => message.session_id)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ).slice(0, 5);
+
+  const recentSessionSummaries = sessionIdsNewestFirst.map((sessionId) => {
+    const sessionMessages = cleaned.filter((message) => message.session_id === sessionId).slice(-4);
+    const summary = sessionMessages.map((message) => `${message.role === 'user' ? 'U' : 'M'}: ${message.content.slice(0, 140)}`).join(' | ');
+    return `Session ${sessionId.slice(0, 8)}: ${summary}`;
+  });
+
+  const decisionRegex = /(vi beslutade|jag beslutade|du borde|mitt råd är|nästa steg är|we decided|you should|my recommendation is|next step is)[:\s]+([^.!?\n]+)/gi;
+  const questionRegex = /([^.!?\n]+\?)/g;
+
+  const importantDecisions = Array.from(
+    new Set(
+      cleaned.flatMap((message) => {
+        const matches = Array.from(message.content.matchAll(decisionRegex));
+        return matches.map((match) => match[2]?.trim()).filter((value): value is string => Boolean(value));
+      }),
+    ),
+  ).slice(0, 8);
+
+  const openQuestions = Array.from(
+    new Set(
+      cleaned
+        .filter((message) => message.role !== 'user')
+        .flatMap((message) => {
+          const matches = message.content.match(questionRegex) ?? [];
+          return matches.map((value) => value.trim());
+        }),
+    ),
+  ).slice(-5);
+
+  return {
+    latestTenSummary: latestTenSummary || 'Inga tidigare mentor-samtal ännu.',
+    recentSessionSummaries,
+    importantDecisions,
+    openQuestions,
+  };
+}
+
+async function buildPersonalizedWelcome(args: {
+  projectTitle: string | null;
+  industryLabel: string;
+  geoLabel: string;
+  projectStatusSummary: string;
+  conversationMemory: ReturnType<typeof buildConversationMemory>;
+  brainEventsSummary: string[];
+  requestLanguage: string;
+}) {
+  const company = args.projectTitle ?? 'bolaget';
+  const brainEventText = args.brainEventsSummary.length > 0 ? args.brainEventsSummary.join(' | ') : 'inga större nya händelser ännu';
+  const latestDecision = args.conversationMemory.importantDecisions[0] ?? null;
+  const latestOpenQuestion = args.conversationMemory.openQuestions[args.conversationMemory.openQuestions.length - 1] ?? null;
+
+  if (args.requestLanguage === 'svenska') {
+    return [
+      `Hej! Jag har tänkt på ${company} sedan sist.`,
+      `Det jag ser nu är ${args.projectStatusSummary} i ${args.industryLabel} med fokus på ${args.geoLabel}.`,
+      `Det tydligaste jag reagerar på är ${brainEventText}${latestDecision ? `, särskilt eftersom ni redan lutat åt ${latestDecision}` : ''}.`,
+      `Idag hade jag prioriterat ett konkret steg som flyttar intäkt eller minskar risk direkt innan ni bygger mer.${latestOpenQuestion ? ` Senast lämnade vi också frågan öppen: ${latestOpenQuestion}` : ''}`,
+      'Vad vill du fokusera på?',
+    ].join(' ');
+  }
+
+  return [
+    `Hi! I've been thinking about ${company} since last time.`,
+    `What I see right now is ${args.projectStatusSummary} in ${args.industryLabel} with focus on ${args.geoLabel}.`,
+    `The clearest signal is ${brainEventText}${latestDecision ? `, especially because you were already leaning toward ${latestDecision}` : ''}.`,
+    `Today I would prioritize one concrete move that either drives revenue or lowers risk before building more.${latestOpenQuestion ? ` We also left this open last time: ${latestOpenQuestion}` : ''}`,
+    'What do you want to focus on?',
+  ].join(' ');
+}
+
+function buildBrainEventsSummary(activeEntries: BrainMemoryEntry[]) {
+  return activeEntries
+    .slice()
+    .sort((a: BrainMemoryEntry, b: BrainMemoryEntry) => (a.createdAt < b.createdAt ? 1 : -1))
+    .slice(0, 6)
+    .map((entry: BrainMemoryEntry) => entry.title ?? entry.summary ?? entry.entityKey)
+    .filter((value: string): value is string => Boolean(value));
+}
+
+function buildImplementationPrompt(reply: string, projectTitle: string | null) {
+  const cleanReply = stripImplementationMarker(reply).replace(/\s+/g, ' ').trim();
+  if (!cleanReply) {
+    return null;
+  }
+
+  const implementationSignals = [
+    'implementera',
+    'lägg till',
+    'ändra',
+    'bygg',
+    'fixa',
+    'skapa',
+    'add',
+    'update',
+    'implement',
+    'create',
+    'fix',
+    'remove',
+  ];
+
+  const lower = cleanReply.toLowerCase();
+  const shouldImplement = implementationSignals.some((signal) => lower.includes(signal));
+
+  if (!shouldImplement) {
+    return null;
+  }
+
+  return `Implement this mentor recommendation in the existing codebase for ${projectTitle ?? 'the current project'}: ${cleanReply}. Make minimal additive changes, preserve existing behavior, avoid touching protected core files, and finish by summarizing exactly what was implemented.`;
+}
+
+function appendImplementationMarker(reply: string, projectTitle: string | null) {
+  const prompt = buildImplementationPrompt(reply, projectTitle);
+  if (!prompt) {
+    return reply;
+  }
+
+  const escapedPrompt = prompt.replace(/"/g, '&quot;');
+  return `${reply}\n\n[data-implement="true" data-prompt="${escapedPrompt}"]`;
+}
+
 function normalizeDocumentReadyPayload(payload: Record<string, unknown>) {
   const title = typeof payload.title === 'string' && payload.title.trim().length > 0 ? payload.title.trim() : 'Document';
   const documentType =
@@ -228,7 +422,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
     return Response.json({ error: '[RIDVAN-E851] Missing projectId or message' }, { status: 400 });
   }
 
-  const { success: mentorRateLimitSuccess, reset: mentorRateLimitReset } = await checkRateLimit(mentorRateLimit, user.id);
+  const { success: mentorRateLimitSuccess, reset: mentorRateLimitReset } = await checkRateLimit(
+    mentorRateLimit,
+    user.id,
+    context.cloudflare.env,
+  );
 
   if (!mentorRateLimitSuccess) {
     return Response.json(
@@ -306,6 +504,22 @@ export async function action({ context, request }: ActionFunctionArgs) {
     env: context.cloudflare.env,
   }).catch(() => null);
 
+  const { data: mentorHistoryRows } = await supabaseAdmin
+    .from('mentor_messages')
+    .select('id, session_id, role, content, created_at')
+    .eq('project_id', projectId)
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: true })
+    .limit(200)
+    .returns<MentorMessageRow[]>();
+
+  let conversationMemory = buildConversationMemory([]);
+  try {
+    conversationMemory = buildConversationMemory(mentorHistoryRows ?? []);
+  } catch {
+    conversationMemory = buildConversationMemory([]);
+  }
+
   const { count: existingAssistantMessagesCount } = await supabaseAdmin
     .from('mentor_messages')
     .select('*', { count: 'exact', head: true })
@@ -344,6 +558,20 @@ export async function action({ context, request }: ActionFunctionArgs) {
         sampleFiles: snapshotFileNames.slice(0, 25),
       }
     : null;
+  const requestLanguage = pickUserLanguage(message, request.headers.get('accept-language'));
+  let projectStatusSummary = 'projektet är nytt och fortfarande i ett tidigt skede';
+  let brainEventsSummary: string[] = [];
+  try {
+    projectStatusSummary = summarizeProjectStatus({ projectTitle, snapshotSummary, brainState: brain.state });
+    brainEventsSummary = buildBrainEventsSummary(brain.activeEntries);
+  } catch {
+    projectStatusSummary = 'projektet är nytt och fortfarande i ett tidigt skede';
+    brainEventsSummary = [];
+  }
+  const industryLabel = brain.industryProfile?.normalizedIndustry ?? 'okänd bransch';
+  const geoLabel = brain.geoProfile?.city
+    ? `${brain.geoProfile.city}, ${brain.geoProfile.countryCode}`
+    : brain.geoProfile?.countryCode ?? 'okänd marknad';
 
   let attachmentAnalyses: Awaited<ReturnType<typeof analyzeMentorAttachments>> = [];
   let attachmentAnalysisContext: string | null = null;
@@ -407,6 +635,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
           }
         : null,
       projectTitle,
+      companyName: projectTitle,
+      memorySummary: conversationMemory.latestTenSummary,
+      recentSessionSummaries: conversationMemory.recentSessionSummaries,
+      priorDecisions: conversationMemory.importantDecisions,
+      openQuestions: conversationMemory.openQuestions,
+      projectStatusSummary,
+      brainEventsSummary,
       attachmentAnalysisContext,
       latestSnapshotSummary: snapshotSummary,
       modelHint: complexity,
@@ -464,9 +699,36 @@ ${systemInstruction}` : baseSystem;
       return Response.json({ error: `[RIDVAN-E853] Failed to parse Mentor output: ${messageText}`, raw: finalText }, { status: 500 });
     }
 
-    const intelligenceSection = existingAssistantMessagesCount === 0 ? buildProactiveIntelligenceSection(vertical) : '';
-    const reply = intelligenceSection ? `${intelligenceSection}\n\n${parsed.reply}` : parsed.reply;
-    const events = parsed.events
+    const shouldAddIntro = (existingAssistantMessagesCount ?? 0) === 0;
+    const intelligenceSection = shouldAddIntro ? buildProactiveIntelligenceSection(vertical) : '';
+
+    let proactiveWelcome = '';
+    if (shouldAddIntro) {
+      try {
+        proactiveWelcome = await buildPersonalizedWelcome({
+          projectTitle,
+          industryLabel,
+          geoLabel,
+          projectStatusSummary,
+          conversationMemory,
+          brainEventsSummary,
+          requestLanguage,
+        });
+      } catch {
+        proactiveWelcome = '';
+      }
+    }
+
+    const combinedReply = [proactiveWelcome, intelligenceSection, parsed.reply].filter((value) => value.trim().length > 0).join('\n\n');
+
+    let reply = combinedReply || parsed.reply;
+    try {
+      reply = appendImplementationMarker(reply, projectTitle);
+    } catch {
+      reply = combinedReply || parsed.reply;
+    }
+
+    const events = (Array.isArray(parsed.events) ? parsed.events : [])
       .map((e) => {
         const basePayload = {
           ...e.payload,

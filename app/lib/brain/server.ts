@@ -101,7 +101,10 @@ export async function insertBrainEvent(args: {
         return existingId;
       }
 
-      const fallbackInsert = await supabaseAdmin.from('brain_events').insert(row).select('id');
+      const fallbackInsert = await supabaseAdmin
+        .from('brain_events')
+        .upsert(row, { onConflict: 'workspace_id,idempotency_key', ignoreDuplicates: true })
+        .select('id');
       const fallbackData = fallbackInsert.data as Array<{ id: string }> | null;
 
       if (fallbackInsert.error) {
@@ -179,7 +182,11 @@ export async function insertBrainEventsBatch(args: {
             continue;
           }
 
-          const fallbackInsert = await supabaseAdmin.from('brain_events').insert(row).select('id').returns<Array<{ id: string }>>();
+          const fallbackInsert = await supabaseAdmin
+            .from('brain_events')
+            .upsert(row, { onConflict: 'workspace_id,idempotency_key', ignoreDuplicates: true })
+            .select('id')
+            .returns<Array<{ id: string }>>();
 
           if (fallbackInsert.error) {
             if (isDuplicateIdempotencyError(fallbackInsert.error.message)) {

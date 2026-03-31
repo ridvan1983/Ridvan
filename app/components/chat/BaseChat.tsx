@@ -177,7 +177,28 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                     )}
                   </ClientOnly>
                   <div className="flex justify-between text-sm p-4 pt-2">
-                    <div />
+                    <div>
+                      <IconButton
+                        title="Enhance prompt"
+                        disabled={enhancingPrompt || input.trim().length === 0}
+                        className={classNames(
+                          'border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 text-bolt-elements-textSecondary enabled:hover:text-bolt-elements-textPrimary enabled:hover:bg-bolt-elements-item-backgroundActive rounded-lg px-2 py-1',
+                          {
+                            'opacity-100!': enhancingPrompt,
+                            'text-bolt-elements-item-contentAccent! pr-1.5 enabled:hover:bg-bolt-elements-item-backgroundAccent!':
+                              promptEnhanced,
+                          },
+                        )}
+                        onClick={() => {
+                          enhancePrompt?.();
+                        }}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <div className={classNames(enhancingPrompt ? 'i-svg-spinners:90-ring-with-bg' : 'i-ph:magic-wand')} />
+                          <span>{enhancingPrompt ? 'Enhancing…' : 'Enhance'}</span>
+                        </div>
+                      </IconButton>
+                    </div>
                     {input.length > 3 ? (
                       <div className="text-xs text-bolt-elements-textTertiary">
                         Use <kbd className="kdb">Shift</kbd> + <kbd className="kdb">Return</kbd> for a new line

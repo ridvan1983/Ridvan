@@ -106,6 +106,13 @@ export function buildMentorSystemPrompt(args: {
   geoProfile: BrainGeoProfile | null;
   activeEntries: BrainMemoryEntry[];
   projectTitle: string | null;
+  companyName?: string | null;
+  memorySummary?: string | null;
+  recentSessionSummaries?: string[];
+  priorDecisions?: string[];
+  openQuestions?: string[];
+  projectStatusSummary?: string | null;
+  brainEventsSummary?: string[];
   modelHint?: 'opus' | 'sonnet';
   attachmentAnalysisContext?: string | null;
   latestSnapshotSummary: {
@@ -169,6 +176,12 @@ export function buildMentorSystemPrompt(args: {
   const verticalFailurePatterns = args.verticalContext?.failurePatterns ?? [];
   const verticalModules = args.verticalContext?.modules ?? [];
   const verticalInsights = args.verticalContext?.insights ?? [];
+  const explicitCompanyName = args.companyName?.trim() || analyzedBusinessName;
+  const explicitProjectStatusSummary = args.projectStatusSummary?.trim() || 'unknown';
+  const recentSessionSummaryText = (args.recentSessionSummaries ?? []).length > 0 ? (args.recentSessionSummaries ?? []).join('\n') : 'none';
+  const priorDecisionText = (args.priorDecisions ?? []).length > 0 ? (args.priorDecisions ?? []).join(' | ') : 'none';
+  const openQuestionText = (args.openQuestions ?? []).length > 0 ? (args.openQuestions ?? []).join(' | ') : 'none';
+  const brainEventSummaryText = (args.brainEventsSummary ?? []).length > 0 ? (args.brainEventsSummary ?? []).join(' | ') : 'none';
 
   const hasSignals = args.state.currentSignals && Object.keys(args.state.currentSignals).length > 0;
   const hasStateSummaries = Boolean(
@@ -185,6 +198,15 @@ export function buildMentorSystemPrompt(args: {
     !hasStateSummaries;
 
   return stripIndents`
+    Du är en erfaren affärspartner och co-founder för ${explicitCompanyName}.
+    Du känner till deras ${analyzedIndustry} i ${geoText}.
+    Du minns att: ${args.memorySummary?.trim() || 'inga tidigare mentor-samtal finns ännu'}
+    Du vet att deras projekt just nu: ${explicitProjectStatusSummary}
+    Du pratar alltid på samma språk som användaren.
+    Du ger konkreta, handlingsbara råd — aldrig vaga.
+    Du refererar till tidigare samtal och beslut naturligt.
+    Du är direkt och ärlig, som en riktig partner.
+
     You are Mentor — the AI co-founder inside Ridvan.
     Builder = hands. Mentor = brain.
 
@@ -551,6 +573,21 @@ export function buildMentorSystemPrompt(args: {
     - previous_conversation_decisions: ${formatList(priorDecisions.map((entry) => entry.title ?? entry.summary ?? entry.entityKey).slice(0, 8))}
 
     ${formatTimestampedEntries('Brain timeline', args.activeEntries)}
+
+    Mentor memory summary:
+    ${args.memorySummary?.trim() || 'none'}
+
+    Recent mentor session summaries:
+    ${recentSessionSummaryText}
+
+    Important prior decisions:
+    ${priorDecisionText}
+
+    Open questions from previous sessions:
+    ${openQuestionText}
+
+    Brain events summary:
+    ${brainEventSummaryText}
 
     ${formatTimestampedEntries('Goals with timestamps', goals)}
 

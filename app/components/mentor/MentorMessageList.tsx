@@ -2,6 +2,17 @@ import { useEffect, useRef } from 'react';
 import { MentorMessageBubble } from './MentorMessageBubble';
 import { DocumentCard, type MentorDocumentCard } from './DocumentCard';
 
+function extractImplementationAction(content: string) {
+  const match = content.match(/\[data-implement="true"\s+data-prompt="([\s\S]*?)"\]$/m);
+  if (!match) {
+    return { visibleContent: content, prompt: null };
+  }
+
+  const prompt = match[1]?.replace(/&quot;/g, '"').trim() ?? null;
+  const visibleContent = content.replace(match[0], '').trim();
+  return { visibleContent, prompt };
+}
+
 export interface MentorChatMessage {
   id: string;
   role: 'user' | 'mentor' | 'system';
@@ -26,7 +37,14 @@ export interface MentorChatMessage {
   documentCard?: MentorDocumentCard;
 }
 
-export function MentorMessageList(props: { messages: MentorChatMessage[]; isTyping: boolean; typingText?: string }) {
+export function MentorMessageList(props: {
+  messages: MentorChatMessage[];
+  isTyping: boolean;
+  typingText?: string;
+  onImplement?: (prompt: string, messageId: string) => void;
+  implementingMessageId?: string | null;
+  implementedMessageId?: string | null;
+}) {
   const endRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -39,6 +57,8 @@ export function MentorMessageList(props: { messages: MentorChatMessage[]; isTypi
         {props.messages.map((m) => {
           const align = m.role === 'user' ? 'items-end' : 'items-start';
           const tsAlign = m.role === 'user' ? 'text-right' : 'text-left';
+          const implementation = extractImplementationAction(m.content);
+          const canImplement = m.role === 'mentor' && Boolean(implementation.prompt) && !m.documentCard && !m.priorityCard;
 
           return (
             <div key={m.id} className={`flex flex-col ${align}`}>
@@ -73,7 +93,23 @@ export function MentorMessageList(props: { messages: MentorChatMessage[]; isTypi
                   </div>
                 ) : null}
 
-                {m.content ? <div className="whitespace-pre-wrap leading-relaxed">{m.content}</div> : null}
+                {implementation.visibleContent ? <div className="whitespace-pre-wrap leading-relaxed">{implementation.visibleContent}</div> : null}
+
+                {canImplement ? (
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      className="text-xs font-medium text-violet-700 transition hover:text-violet-900"
+                      onClick={() => {
+                        if (implementation.prompt) {
+                          props.onImplement?.(implementation.prompt, m.id);
+                        }
+                      }}
+                    >
+                      {props.implementingMessageId === m.id ? 'Implementeras...' : props.implementedMessageId === m.id ? 'Klart ✓' : 'Implementera →'}
+                    </button>
+                  </div>
+                ) : null}
               </MentorMessageBubble>
               <div className={`mt-1 text-[10px] opacity-60 ${tsAlign}`}>{new Date(m.createdAt).toLocaleTimeString()}</div>
             </div>

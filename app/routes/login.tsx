@@ -18,7 +18,7 @@ function getRequestIp(request: Request) {
   return 'unknown';
 }
 
-export async function action({ request }: ActionFunctionArgs) {
+export async function action({ context, request }: ActionFunctionArgs) {
   if (request.method !== 'POST') {
     return Response.json({ error: 'Method Not Allowed' }, { status: 405 });
   }
@@ -28,7 +28,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const mode = body?.mode === 'signup' ? 'signup' : 'login';
   const ip = getRequestIp(request);
   const identifier = `${mode}:${ip}:${email}`;
-  const { success, reset } = await checkRateLimit(authRateLimit, identifier);
+  const { success, reset } = await checkRateLimit(authRateLimit, identifier, context.cloudflare.env);
 
   if (!success) {
     return Response.json(
