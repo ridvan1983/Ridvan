@@ -3,6 +3,7 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { IconButton } from '~/components/ui/IconButton';
 import { writeBrainEvent } from '~/lib/brain/events.client';
 import { collectTextFiles } from '~/lib/projects/snapshot.client';
+import { getProject } from '~/lib/projects/api.client';
 import { organismAccessToken, organismPreviewReadyAt, organismProjectId } from '~/lib/stores/organism';
 import { workbenchStore } from '~/lib/stores/workbench';
 import { webcontainer } from '~/lib/webcontainer';
@@ -158,6 +159,9 @@ async function readDistFiles(dir = 'dist'): Promise<DeployFile[]> {
 }
 
 export const Preview = memo(() => {
+  const projectId = useStore(organismProjectId);
+  const accessToken = useStore(organismAccessToken);
+
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [activePreviewIndex, setActivePreviewIndex] = useState(0);
@@ -241,6 +245,54 @@ export const Preview = memo(() => {
       setPublishSubdomain((current) => current || nextSlug);
     }
   }, []);
+
+  useEffect(() => {
+    if (!projectId?.trim() || !accessToken) {
+      setLiveUrl(null);
+      setVercelProjectId(null);
+      setCustomDomain(null);
+      setDeployProvider(null);
+      setDeployStage('idle');
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const row = await getProject(accessToken, projectId);
+        if (cancelled) {
+          return;
+        }
+
+        const published = row.previewUrl?.trim() ?? '';
+        setLiveUrl(published.length > 0 ? published : null);
+        setVercelProjectId(row.vercelProjectId ?? null);
+        setCustomDomain(row.customDomain ?? null);
+
+        if (published.length > 0) {
+          setDeployStage('live');
+          const host = published.toLowerCase();
+          setDeployProvider(host.includes('netlify.app') ? 'netlify' : 'vercel');
+        } else {
+          setDeployStage('idle');
+          setDeployProvider(null);
+        }
+      } catch {
+        if (!cancelled) {
+          setLiveUrl(null);
+          setVercelProjectId(null);
+          setCustomDomain(null);
+          setDeployStage('idle');
+          setDeployProvider(null);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, accessToken]);
 
   const validateUrl = useCallback(
     (value: string) => {

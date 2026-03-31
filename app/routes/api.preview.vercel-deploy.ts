@@ -316,18 +316,16 @@ export async function action({ context, request }: ActionFunctionArgs) {
     return Response.json({ error: message, provider: 'vercel', status: 'error' }, { status: 500 });
   }
 
-  const responseUrl = deployment.url ? `https://${deployment.url}` : null;
-  const deploymentUrl = toVercelUrl(deployment.url) ?? toVercelUrl(readyDeployment.url);
-
-  if (!responseUrl || !deploymentUrl) {
-    return Response.json({ error: '[RIDVAN-E1940] Vercel deployment became ready but returned no live URL', provider: 'vercel', status: 'error' }, { status: 500 });
-  }
-
   const vercelProjectId = project.vercel_project_id ?? deployment.project?.id ?? readyDeployment.project?.id ?? null;
   const savedProjectName = project.vercel_project_name ?? deployment.project?.name ?? readyDeployment.project?.name ?? vercelProjectName;
+  const deploymentUrl = toVercelUrl(deployment.url) ?? toVercelUrl(readyDeployment.url);
   const aliasUrl = getDeploymentAliasUrl(readyDeployment, deployment);
   const projectUrl = savedProjectName ? toVercelUrl(`${savedProjectName}.vercel.app`) : null;
   const effectivePreviewUrl = deploymentUrl ?? aliasUrl ?? projectUrl ?? project.preview_url;
+
+  if (!effectivePreviewUrl) {
+    return Response.json({ error: '[RIDVAN-E1940] Vercel deployment became ready but returned no live URL', provider: 'vercel', status: 'error' }, { status: 500 });
+  }
   const effectiveCustomDomain = null;
 
   const { error: updateError } = await supabaseAdmin
@@ -352,7 +350,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     ok: true,
     provider: 'vercel',
     status: 'live',
-    url: responseUrl,
+    url: effectivePreviewUrl,
     reused: false,
     vercelProjectId,
     customDomain: effectiveCustomDomain,

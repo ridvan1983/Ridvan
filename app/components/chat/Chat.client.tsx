@@ -24,6 +24,7 @@ import { workbenchStore } from '~/lib/stores/workbench';
 import { fileModificationsToHTML } from '~/utils/diff';
 import { cubicEasingFn } from '~/utils/easings';
 import { createScopedLogger, renderLogger } from '~/utils/logger';
+import { CREDIT_REFRESH_EVENT } from '~/components/credits/CreditDisplay';
 import OutOfCreditsModal from '~/components/credits/OutOfCreditsModal';
 import { BaseChat } from './BaseChat';
 import GenerationProgress from './GenerationProgress';
@@ -364,6 +365,30 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
       organismAccessToken.set(null);
     };
   }, [session?.access_token]);
+
+  useEffect(() => {
+    const stripeCheckoutSessionId = searchParams.get('session_id');
+    if (!stripeCheckoutSessionId?.trim()) {
+      return;
+    }
+
+    const refresh = () => {
+      window.dispatchEvent(new Event(CREDIT_REFRESH_EVENT));
+    };
+
+    refresh();
+    const t1 = window.setTimeout(refresh, 1500);
+    const t2 = window.setTimeout(refresh, 4000);
+
+    const next = new URLSearchParams(searchParams);
+    next.delete('session_id');
+    setSearchParams(next, { replace: true });
+
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     const projectIdParam = searchParams.get('projectId');

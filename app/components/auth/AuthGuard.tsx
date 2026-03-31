@@ -10,7 +10,8 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!loading && (!user || !session)) {
-      navigate('/login', { replace: true });
+      const redirectTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      navigate(`/login?redirectTo=${encodeURIComponent(redirectTo)}`, { replace: true });
     }
   }, [loading, navigate, session, user]);
 

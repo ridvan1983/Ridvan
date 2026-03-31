@@ -15,6 +15,25 @@ export async function listProjects(accessToken: string): Promise<Project[]> {
   return (await res.json()) as Project[];
 }
 
+export async function getProject(accessToken: string, projectId: string): Promise<Project> {
+  const res = await fetch(`/api/projects?projectId=${encodeURIComponent(projectId)}`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (res.status === 404) {
+    throw new Error(`[RIDVAN-E705] Project not found`);
+  }
+
+  if (!res.ok) {
+    throw new Error(`[RIDVAN-E706] Failed to load project (${res.status})`);
+  }
+
+  return (await res.json()) as Project;
+}
+
 export async function upsertProject(accessToken: string, project: { id: string; title?: string | null }): Promise<Project> {
   const res = await fetch('/api/projects', {
     method: 'POST',

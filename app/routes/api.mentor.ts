@@ -547,16 +547,6 @@ ${systemInstruction}` : baseSystem;
 
     const events = normalizeMentorEvents(generated.events);
 
-    await markMentorUnread({ userId: user.id, projectId, reply, eventCount: events.length });
-
-    const shouldChargeReply = reply.trim().length > 0;
-    if (shouldChargeReply) {
-      const deduction = await deductCredit(user.id, 'Mentor reply', 1);
-      if (!deduction.success) {
-        return noCreditsResponse();
-      }
-    }
-
     try {
       await writeAndIngestMentorEvents({
         workspaceId: workspace.id,
@@ -568,6 +558,16 @@ ${systemInstruction}` : baseSystem;
       const messageText = error instanceof Error ? error.message : String(error ?? 'Unknown error');
       return Response.json({ error: messageText, reply }, { status: 500 });
     }
+
+    const shouldChargeReply = reply.trim().length > 0;
+    if (shouldChargeReply) {
+      const deduction = await deductCredit(user.id, 'Mentor reply', 1);
+      if (!deduction.success) {
+        return noCreditsResponse();
+      }
+    }
+
+    await markMentorUnread({ userId: user.id, projectId, reply, eventCount: events.length });
 
     return Response.json({ reply, events, eventsWritten: events.length });
   }

@@ -69,6 +69,27 @@ export async function requireMentorAccess(args: {
     };
   }
 
+  const { data: projectRow, error: projectError } = await supabaseAdmin
+    .from('projects')
+    .select('id, user_id')
+    .eq('id', projectId)
+    .eq('user_id', user.id)
+    .maybeSingle<{ id: string; user_id: string }>();
+
+  if (projectError) {
+    return {
+      ok: false,
+      response: Response.json({ error: `[RIDVAN-E859] Failed to validate project access: ${projectError.message}` }, { status: 500 }),
+    };
+  }
+
+  if (!projectRow) {
+    return {
+      ok: false,
+      response: Response.json({ error: '[RIDVAN-E860] Unauthorized project' }, { status: 403 }),
+    };
+  }
+
   const { success: mentorRateLimitSuccess, reset: mentorRateLimitReset } = await checkRateLimit(
     mentorRateLimit,
     user.id,

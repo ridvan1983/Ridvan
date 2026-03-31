@@ -66,7 +66,7 @@ export function PricingPage() {
 
   const handleUpgrade = async (planId: PaidPlanId) => {
     if (!session?.access_token) {
-      window.location.href = '/login';
+      window.location.href = `/login?redirectTo=${encodeURIComponent('/pricing')}`;
       return;
     }
 
@@ -124,7 +124,7 @@ export function PricingPage() {
               </>
             ) : (
               <a
-                href="/login"
+                href={`/login?redirectTo=${encodeURIComponent('/pricing')}`}
                 className="rounded-lg border border-bolt-elements-borderColor px-3 py-1.5 text-sm hover:bg-bolt-elements-background-depth-3"
               >
                 Log in
@@ -151,7 +151,7 @@ export function PricingPage() {
               </ul>
             </div>
             <a
-              href="/login"
+              href={`/login?redirectTo=${encodeURIComponent('/pricing')}`}
               className="mt-6 inline-flex justify-center rounded-lg border border-bolt-elements-borderColor px-4 py-2 text-sm font-medium hover:bg-bolt-elements-background-depth-3"
             >
               Get Started

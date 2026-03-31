@@ -6,6 +6,20 @@ import { captureError } from '~/lib/server/monitoring.server';
 import { PLANS, stripe } from '~/lib/stripe/config';
 import { supabaseAdmin } from '~/lib/supabase/server';
 
+function subscriptionIdFromCheckoutSession(session: Stripe.Checkout.Session): string | null {
+  const sub = session.subscription;
+
+  if (typeof sub === 'string') {
+    return sub;
+  }
+
+  if (sub && typeof sub === 'object' && 'id' in sub) {
+    return (sub as Stripe.Subscription).id;
+  }
+
+  return null;
+}
+
 export async function action({ context, request }: ActionFunctionArgs) {
   if (request.method !== 'POST') {
     return Response.json({ error: 'Method Not Allowed' }, { status: 405 });
@@ -43,7 +57,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           {
             user_id: userId,
             plan: planId,
-            stripe_subscription_id: typeof session.subscription === 'string' ? session.subscription : null,
+            stripe_subscription_id: subscriptionIdFromCheckoutSession(session),
             monthly_credits: plan.monthlyCredits,
             daily_credits: plan.dailyCredits,
             status: 'active',

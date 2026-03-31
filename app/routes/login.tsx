@@ -1,5 +1,5 @@
 import { type ActionFunctionArgs } from '@remix-run/cloudflare';
-import { Navigate } from '@remix-run/react';
+import { Navigate, useSearchParams } from '@remix-run/react';
 import { LoginPage } from '~/components/auth/LoginPage';
 import { useAuth } from '~/lib/auth/AuthContext';
 import { authRateLimit, checkRateLimit } from '~/lib/security/distributed-rate-limit.server';
@@ -45,6 +45,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
 export default function LoginRoute() {
   const { user, loading } = useAuth();
+  const [searchParams] = useSearchParams();
+  const rawRedirect = searchParams.get('redirectTo');
+  const redirectTo = rawRedirect?.startsWith('/') && !rawRedirect.startsWith('//') ? rawRedirect : '/chat';
 
   if (loading) {
     return (
@@ -55,7 +58,7 @@ export default function LoginRoute() {
   }
 
   if (user) {
-    return <Navigate to="/chat" replace />;
+    return <Navigate to={redirectTo} replace />;
   }
 
   return <LoginPage />;

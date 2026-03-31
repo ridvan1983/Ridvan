@@ -17,7 +17,7 @@ import { readMentorUnread } from '~/lib/mentor/api.client';
 export function Header() {
   const chat = useStore(chatStore);
   const location = useLocation();
-  const isWorkspace = location.pathname.startsWith('/chat/');
+  const isWorkspace = location.pathname === '/chat' || location.pathname.startsWith('/chat/');
   const projectId = useStore(organismProjectId);
   const { session } = useAuth();
   const accessToken = session?.access_token ?? null;

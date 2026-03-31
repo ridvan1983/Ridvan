@@ -10,6 +10,9 @@ interface ProjectRow {
   user_id: string;
   title: string | null;
   preview_url: string | null;
+  vercel_project_id?: string | null;
+  vercel_project_name?: string | null;
+  custom_domain?: string | null;
   supabase_project_id: string | null;
   supabase_project_url: string | null;
   supabase_anon_key: string | null;
@@ -144,6 +147,43 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   if (userError || !user) {
     return Response.json({ error: `[RIDVAN-E711] Unauthorized: ${userError?.message ?? 'invalid token'}` }, { status: 401 });
+  }
+
+  const url = new URL(request.url);
+  const singleProjectId = url.searchParams.get('projectId')?.trim();
+
+  if (singleProjectId) {
+    const { data: row, error: singleError } = await supabaseAdmin
+      .from('projects')
+      .select(
+        'id, user_id, title, preview_url, vercel_project_id, vercel_project_name, custom_domain, supabase_project_id, supabase_project_url, supabase_anon_key, supabase_connected_at, created_at, updated_at',
+      )
+      .eq('id', singleProjectId)
+      .eq('user_id', user.id)
+      .maybeSingle<ProjectRow>();
+
+    if (singleError) {
+      return Response.json({ error: `[RIDVAN-E712] Failed to load project: ${singleError.message}` }, { status: 500 });
+    }
+
+    if (!row) {
+      return Response.json({ error: '[RIDVAN-E715] Project not found' }, { status: 404 });
+    }
+
+    return Response.json({
+      id: row.id,
+      userId: row.user_id,
+      title: row.title,
+      previewUrl: row.preview_url,
+      vercelProjectId: row.vercel_project_id ?? null,
+      customDomain: row.custom_domain ?? null,
+      supabaseProjectId: row.supabase_project_id,
+      supabaseProjectUrl: row.supabase_project_url,
+      supabaseAnonKey: row.supabase_anon_key,
+      supabaseConnectedAt: row.supabase_connected_at,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    });
   }
 
   const { data, error } = await supabaseAdmin

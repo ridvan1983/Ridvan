@@ -41,7 +41,7 @@ export function LandingPage() {
       : `/chat?projectId=${encodeURIComponent(projectId)}`;
 
     if (!session?.access_token) {
-      navigate(`/login?redirect=${encodeURIComponent(target)}`);
+      navigate(`/login?redirectTo=${encodeURIComponent(target)}`);
       return;
     }
 
@@ -145,7 +145,7 @@ export function LandingPage() {
                         const redirectTarget = trimmedPrompt.length > 0
                           ? `/chat?projectId=${encodeURIComponent(projectId)}&prompt=${encodeURIComponent(trimmedPrompt)}`
                           : `/chat?projectId=${encodeURIComponent(projectId)}`;
-                        navigate(`/login?redirect=${encodeURIComponent(redirectTarget)}`);
+                        navigate(`/login?redirectTo=${encodeURIComponent(redirectTarget)}`);
                         return;
                       }
 
