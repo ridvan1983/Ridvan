@@ -1,4 +1,5 @@
 import { type ActionFunctionArgs } from '@remix-run/cloudflare';
+import { FEATURE_FLAGS } from '~/config/feature-flags';
 import { getOptionalServerEnv } from '~/lib/env.server';
 import { supabaseAdmin } from '~/lib/supabase/server';
 
@@ -40,6 +41,10 @@ async function requireOwnedProject(projectId: string, userId: string) {
 export async function action({ context, request }: ActionFunctionArgs) {
   if (request.method !== 'POST') {
     return Response.json({ error: 'Method Not Allowed' }, { status: 405 });
+  }
+
+  if (!FEATURE_FLAGS.customDomains) {
+    return Response.json({ error: '[RIDVAN-E1943] Custom domains are disabled for MVP' }, { status: 404 });
   }
 
   const vercelToken = getOptionalServerEnv('VERCEL_TOKEN', context.cloudflare?.env);

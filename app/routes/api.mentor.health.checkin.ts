@@ -1,4 +1,5 @@
 import { type ActionFunctionArgs } from '@remix-run/cloudflare';
+import { FEATURE_FLAGS } from '~/config/feature-flags';
 import { requireUserFromBearerToken } from '~/lib/brain/auth.server';
 import { ensureBrainWorkspace, insertBrainEvent } from '~/lib/brain/server';
 import { supabaseAdmin } from '~/lib/supabase/server';
@@ -22,6 +23,10 @@ function metricQuestion(metric: (typeof METRICS)[number]) {
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== 'POST') {
     return Response.json({ error: 'Method Not Allowed' }, { status: 405 });
+  }
+
+  if (!FEATURE_FLAGS.mentorHealthCheckIn) {
+    return Response.json({ error: '[RIDVAN-E1353] Health check-in is disabled for MVP' }, { status: 404 });
   }
 
   const { user } = await requireUserFromBearerToken(request);

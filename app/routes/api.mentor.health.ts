@@ -1,4 +1,5 @@
 import { type ActionFunctionArgs } from '@remix-run/cloudflare';
+import { FEATURE_FLAGS } from '~/config/feature-flags';
 import { requireUserFromBearerToken } from '~/lib/brain/auth.server';
 import { supabaseAdmin } from '~/lib/supabase/server';
 
@@ -19,6 +20,10 @@ type Row = {
 export async function loader({ request }: ActionFunctionArgs) {
   if (request.method !== 'GET') {
     return Response.json({ error: 'Method Not Allowed' }, { status: 405 });
+  }
+
+  if (!FEATURE_FLAGS.mentorHealth) {
+    return Response.json({ error: '[RIDVAN-E1310] Mentor health is disabled for MVP' }, { status: 404 });
   }
 
   const { user } = await requireUserFromBearerToken(request);
@@ -55,6 +60,10 @@ export async function loader({ request }: ActionFunctionArgs) {
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== 'POST') {
     return Response.json({ error: 'Method Not Allowed' }, { status: 405 });
+  }
+
+  if (!FEATURE_FLAGS.mentorHealth) {
+    return Response.json({ error: '[RIDVAN-E1311] Mentor health is disabled for MVP' }, { status: 404 });
   }
 
   const { user } = await requireUserFromBearerToken(request);

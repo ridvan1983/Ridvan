@@ -1,4 +1,4 @@
-import { useLoaderData, useNavigate } from '@remix-run/react';
+import { useLoaderData } from '@remix-run/react';
 import { useState, useEffect } from 'react';
 import { atom } from 'nanostores';
 import type { Message } from 'ai';
@@ -22,7 +22,6 @@ export const chatId = atom<string | undefined>(undefined);
 export const description = atom<string | undefined>(undefined);
 
 export function useChatHistory() {
-  const navigate = useNavigate();
   const { id: mixedId } = useLoaderData<{ id?: string }>();
 
   const [initialMessages, setInitialMessages] = useState<Message[]>([]);
@@ -70,7 +69,7 @@ export function useChatHistory() {
       setUrlId(undefined);
       setInitialMessages([]);
     }
-  }, [mixedId, navigate]);
+  }, [mixedId]);
 
   return {
     ready: !mixedId || ready,
@@ -118,12 +117,12 @@ export function useChatHistory() {
 }
 
 function navigateChat(nextId: string) {
-  /**
-   * FIXME: Using the intended navigate function causes a rerender for <Chat /> that breaks the app.
-   *
-   * `navigate(`/chat/${nextId}`, { replace: true });`
-   */
   const url = new URL(window.location.href);
+
+  if (url.pathname === `/chat/${nextId}`) {
+    return;
+  }
+
   url.pathname = `/chat/${nextId}`;
 
   window.history.replaceState({}, '', url);

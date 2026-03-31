@@ -1,6 +1,7 @@
 import { type ActionFunctionArgs } from '@remix-run/cloudflare';
 import { streamText as aiStreamText, convertToCoreMessages } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
+import { FEATURE_FLAGS } from '~/config/feature-flags';
 import { getAPIKey } from '~/lib/.server/llm/api-key';
 import { MAX_TOKENS } from '~/lib/.server/llm/constants';
 import { requireUserFromBearerToken } from '~/lib/brain/auth.server';
@@ -51,6 +52,10 @@ export async function loader({ request }: ActionFunctionArgs) {
     return Response.json({ error: 'Method Not Allowed' }, { status: 405 });
   }
 
+  if (!FEATURE_FLAGS.mentorDailyPriority) {
+    return Response.json({ error: '[RIDVAN-E1208] Daily priority is disabled for MVP' }, { status: 404 });
+  }
+
   const { user } = await requireUserFromBearerToken(request);
   const url = new URL(request.url);
   const projectId = url.searchParams.get('projectId');
@@ -77,6 +82,10 @@ export async function loader({ request }: ActionFunctionArgs) {
 export async function action({ request, context }: ActionFunctionArgs) {
   if (request.method !== 'POST') {
     return Response.json({ error: 'Method Not Allowed' }, { status: 405 });
+  }
+
+  if (!FEATURE_FLAGS.mentorDailyPriority) {
+    return Response.json({ error: '[RIDVAN-E1209] Daily priority is disabled for MVP' }, { status: 404 });
   }
 
   const { user } = await requireUserFromBearerToken(request);

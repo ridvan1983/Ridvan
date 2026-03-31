@@ -1,4 +1,6 @@
 import { type ActionFunctionArgs } from '@remix-run/cloudflare';
+import { FEATURE_FLAGS } from '~/config/feature-flags';
+import { getOptionalServerEnv } from '~/lib/env.server';
 import { supabaseAdmin } from '~/lib/supabase/server';
 import { sendResendEmail } from '~/lib/digest/resend.server';
 import { buildWeeklyDigestInsights } from '~/lib/digest/insights.server';
@@ -28,7 +30,7 @@ function escapeHtml(text: string) {
 }
 
 function requireCronSecret(request: Request) {
-  const expected = (process as any)?.env?.DIGEST_CRON_SECRET ?? null;
+  const expected = getOptionalServerEnv('DIGEST_CRON_SECRET') ?? null;
   const provided = request.headers.get('x-digest-secret');
   if (!expected) {
     // Allow local/dev testing without a secret.
@@ -48,6 +50,10 @@ type PrefRow = {
 export async function action({ request, context }: ActionFunctionArgs) {
   if (request.method !== 'POST') {
     return Response.json({ error: 'Method Not Allowed' }, { status: 405 });
+  }
+
+  if (!FEATURE_FLAGS.weeklyDigest) {
+    return Response.json({ error: '[RIDVAN-E1111] Weekly digest is disabled for MVP' }, { status: 404 });
   }
 
   requireCronSecret(request);

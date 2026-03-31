@@ -1,4 +1,5 @@
 import { type ActionFunctionArgs } from '@remix-run/cloudflare';
+import { FEATURE_FLAGS } from '~/config/feature-flags';
 import { requireUserFromBearerToken } from '~/lib/brain/auth.server';
 import { ensureBrainWorkspace, insertBrainEvent } from '~/lib/brain/server';
 import { ingestBrainEventsById } from '~/lib/brain/ingest.server';
@@ -48,6 +49,10 @@ const BRAND_MUTED = '#F8F7F4';
 const BRAND_BORDER = '#E7E5E4';
 const BRAND_GREEN = '#16A34A';
 const BRAND_RED = '#DC2626';
+
+function disabledResponse() {
+  return Response.json({ error: '[RIDVAN-E1601] Mentor document generation is disabled for MVP' }, { status: 404 });
+}
 
 function noCreditsResponse() {
   return Response.json(
@@ -1240,6 +1245,10 @@ async function renderPptx(args: { title: string; blocks: DocBlock[] }) {
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== 'POST') {
     return Response.json({ error: 'Method Not Allowed' }, { status: 405 });
+  }
+
+  if (!FEATURE_FLAGS.documentGeneration) {
+    return disabledResponse();
   }
 
   const { user } = await requireUserFromBearerToken(request);

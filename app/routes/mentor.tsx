@@ -2,6 +2,7 @@ import { json, type MetaFunction } from '@remix-run/cloudflare';
 import { useNavigate } from '@remix-run/react';
 import { Header } from '~/components/header/Header';
 import { useAuth } from '~/lib/auth/AuthContext';
+import { FEATURE_FLAGS } from '~/config/feature-flags';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { listProjects } from '~/lib/projects/api.client';
 import type { Project } from '~/lib/projects/types';
@@ -97,6 +98,11 @@ export default function MentorRoute() {
   const { session } = useAuth();
   const accessToken = session?.access_token ?? null;
   const navigate = useNavigate();
+  const showHealthControls = FEATURE_FLAGS.mentorHealth;
+  const showDailyPriorityControls = FEATURE_FLAGS.mentorDailyPriority;
+  const enableMilestones = FEATURE_FLAGS.mentorMilestones;
+  const enableHealthCheckIn = FEATURE_FLAGS.mentorHealthCheckIn;
+  const enableDocumentGeneration = FEATURE_FLAGS.documentGeneration;
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -319,51 +325,59 @@ export default function MentorRoute() {
         setVerticalContext(null);
       });
 
-    readDailyPriority(accessToken, selectedProjectId)
-      .then((res) => setDailyPriority(res.priority))
-      .catch(() => {
-        setDailyPriority(null);
-      });
+    if (showDailyPriorityControls) {
+      readDailyPriority(accessToken, selectedProjectId)
+        .then((res) => setDailyPriority(res.priority))
+        .catch(() => {
+          setDailyPriority(null);
+        });
+    } else {
+      setDailyPriority(null);
+    }
 
-    runMilestoneCheck(accessToken, selectedProjectId)
-      .then((res) => {
-        const items = Array.isArray(res.milestones) ? res.milestones : [];
-        if (items.length === 0) {
-          return;
-        }
-        setMessages((prev) => [
-          ...prev,
-          ...items.map((m) => ({
-            id: `milestone-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-            role: 'mentor' as const,
-            content: String(m.message ?? ''),
-            createdAt: new Date().toISOString(),
-          })),
-        ]);
-      })
-      .catch(() => {
-        // ignore
-      });
+    if (enableMilestones) {
+      runMilestoneCheck(accessToken, selectedProjectId)
+        .then((res) => {
+          const items = Array.isArray(res.milestones) ? res.milestones : [];
+          if (items.length === 0) {
+            return;
+          }
+          setMessages((prev) => [
+            ...prev,
+            ...items.map((m) => ({
+              id: `milestone-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+              role: 'mentor' as const,
+              content: String(m.message ?? ''),
+              createdAt: new Date().toISOString(),
+            })),
+          ]);
+        })
+        .catch(() => {
+          // ignore
+        });
+    }
 
-    runHealthCheckIn(accessToken, selectedProjectId)
-      .then((res) => {
-        const items = Array.isArray(res.messages) ? res.messages : [];
-        if (items.length === 0) {
-          return;
-        }
-        setMessages((prev) => [
-          ...prev,
-          ...items.map((msg) => ({
-            id: `health-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-            role: 'mentor' as const,
-            content: String(msg ?? ''),
-            createdAt: new Date().toISOString(),
-          })),
-        ]);
-      })
-      .catch(() => {
-        // ignore
-      });
+    if (enableHealthCheckIn) {
+      runHealthCheckIn(accessToken, selectedProjectId)
+        .then((res) => {
+          const items = Array.isArray(res.messages) ? res.messages : [];
+          if (items.length === 0) {
+            return;
+          }
+          setMessages((prev) => [
+            ...prev,
+            ...items.map((msg) => ({
+              id: `health-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+              role: 'mentor' as const,
+              content: String(msg ?? ''),
+              createdAt: new Date().toISOString(),
+            })),
+          ]);
+        })
+        .catch(() => {
+          // ignore
+        });
+    }
 
     fetch(`/api/opportunity/context/${encodeURIComponent(selectedProjectId)}`, {
       method: 'GET',
@@ -378,7 +392,7 @@ export default function MentorRoute() {
       .catch(() => {
         setOpportunityContext(null);
       });
-  }, [accessToken, selectedProjectId]);
+  }, [accessToken, selectedProjectId, enableHealthCheckIn, enableMilestones, showDailyPriorityControls]);
 
   useEffect(() => {
     if (!accessToken || !selectedProjectId || !conversationSessionId || !hasLoadedMentorMessages || hasStoredMentorMessages) {
@@ -511,6 +525,11 @@ Håll det under 150 ord. Direkt och konkret. Aldrig generiskt.`;
     }
 
     if (text.startsWith('/doc')) {
+      if (!enableDocumentGeneration) {
+        setError('Dokumentgenerering är avstängd för MVP.');
+        return;
+      }
+
       setDraft('');
       setIsSending(true);
       setError('');
@@ -682,25 +701,27 @@ Håll det under 150 ord. Direkt och konkret. Aldrig generiskt.`;
         }
       }
 
-      runMilestoneCheck(accessToken, selectedProjectId)
-        .then((milestoneRes) => {
-          const items = Array.isArray(milestoneRes.milestones) ? milestoneRes.milestones : [];
-          if (items.length === 0) {
-            return;
-          }
-          setMessages((prev) => [
-            ...prev,
-            ...items.map((m) => ({
-              id: `milestone-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-              role: 'mentor' as const,
-              content: String(m.message ?? ''),
-              createdAt: new Date().toISOString(),
-            })),
-          ]);
-        })
-        .catch(() => {
-          // ignore
-        });
+      if (enableMilestones) {
+        runMilestoneCheck(accessToken, selectedProjectId)
+          .then((milestoneRes) => {
+            const items = Array.isArray(milestoneRes.milestones) ? milestoneRes.milestones : [];
+            if (items.length === 0) {
+              return;
+            }
+            setMessages((prev) => [
+              ...prev,
+              ...items.map((m) => ({
+                id: `milestone-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                role: 'mentor' as const,
+                content: String(m.message ?? ''),
+                createdAt: new Date().toISOString(),
+              })),
+            ]);
+          })
+          .catch(() => {
+            // ignore
+          });
+      }
 
       const refreshBrain = async () => {
         const delays = [200, 500, 900];
@@ -960,14 +981,16 @@ Håll det under 150 ord. Direkt och konkret. Aldrig generiskt.`;
               isIngesting={isIngesting}
               onRunVertical={onRunVerticalExtract}
               onRunIngestion={onRunIngestion}
+              showHealthControls={showHealthControls}
               onOpenHealth={onOpenHealth}
+              showDailyPriorityControls={showDailyPriorityControls}
               dailyPriority={dailyPriority}
               isDailyPriorityLoading={isDailyPriorityLoading}
               onGenerateDailyPriority={onGenerateDailyPriority}
               onToggleDailyPriority={onToggleDailyPriority}
             />
 
-            {isHealthOpen ? (
+            {showHealthControls && isHealthOpen ? (
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
                 <button type="button" className="absolute inset-0" onClick={() => setIsHealthOpen(false)} aria-label="Close" />
                 <div className="relative w-full max-w-[600px] max-h-[90vh] overflow-auto rounded-[12px] border border-black/10 bg-[#F8F7F4] p-5 shadow-2xl">

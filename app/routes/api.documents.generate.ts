@@ -1,4 +1,5 @@
 import { type ActionFunctionArgs } from '@remix-run/cloudflare';
+import { FEATURE_FLAGS } from '~/config/feature-flags';
 import { streamText } from '~/lib/.server/llm/stream-text';
 import { requireUserFromBearerToken } from '~/lib/brain/auth.server';
 import { readBrainContext } from '~/lib/brain/read.server';
@@ -29,6 +30,10 @@ function titleFor(type: DocumentType) {
 export async function action({ context, request }: ActionFunctionArgs) {
   if (request.method !== 'POST') {
     return Response.json({ error: 'Method Not Allowed' }, { status: 405 });
+  }
+
+  if (!FEATURE_FLAGS.documentGeneration) {
+    return Response.json({ error: '[RIDVAN-E971] Document generation is disabled for MVP' }, { status: 404 });
   }
 
   const { user } = await requireUserFromBearerToken(request);

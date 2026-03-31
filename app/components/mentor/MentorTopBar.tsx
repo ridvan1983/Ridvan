@@ -10,7 +10,9 @@ export function MentorTopBar(props: {
   isIngesting: boolean;
   onRunVertical: () => void;
   onRunIngestion: () => void;
+  showHealthControls: boolean;
   onOpenHealth: () => void;
+  showDailyPriorityControls: boolean;
   dailyPriority: null | { id: string; priority_text: string; date: string; completed: boolean };
   isDailyPriorityLoading: boolean;
   onGenerateDailyPriority: () => void;
@@ -35,27 +37,33 @@ export function MentorTopBar(props: {
         </div>
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={props.onOpenHealth}
-              disabled={!props.selectedProjectId}
-              className="rounded-lg border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 px-3 py-2 text-sm font-semibold text-bolt-elements-textPrimary disabled:opacity-60"
-            >
-              Hälsokoll
-            </button>
+          {props.showHealthControls || props.showDailyPriorityControls ? (
+            <div className="flex items-center gap-2">
+              {props.showHealthControls ? (
+                <button
+                  type="button"
+                  onClick={props.onOpenHealth}
+                  disabled={!props.selectedProjectId}
+                  className="rounded-lg border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 px-3 py-2 text-sm font-semibold text-bolt-elements-textPrimary disabled:opacity-60"
+                >
+                  Hälsokoll
+                </button>
+              ) : null}
 
-            <button
-              type="button"
-              onClick={props.onGenerateDailyPriority}
-              disabled={props.isDailyPriorityLoading || !props.selectedProjectId}
-              className="rounded-lg border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 px-3 py-2 text-sm font-semibold text-bolt-elements-textPrimary disabled:opacity-60"
-            >
-              {props.isDailyPriorityLoading ? 'Laddar…' : 'Dagens prioritet'}
-            </button>
-          </div>
+              {props.showDailyPriorityControls ? (
+                <button
+                  type="button"
+                  onClick={props.onGenerateDailyPriority}
+                  disabled={props.isDailyPriorityLoading || !props.selectedProjectId}
+                  className="rounded-lg border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 px-3 py-2 text-sm font-semibold text-bolt-elements-textPrimary disabled:opacity-60"
+                >
+                  {props.isDailyPriorityLoading ? 'Laddar…' : 'Dagens prioritet'}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
 
-          {props.dailyPriority ? (
+          {props.showDailyPriorityControls && props.dailyPriority ? (
             <label className="flex items-start gap-2 rounded-lg border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 px-3 py-2 text-sm text-bolt-elements-textPrimary">
               <input
                 type="checkbox"

@@ -1,4 +1,5 @@
 import { type ActionFunctionArgs } from '@remix-run/cloudflare';
+import { FEATURE_FLAGS } from '~/config/feature-flags';
 import { createZip } from '~/lib/deploy/zip.server';
 import { getOptionalServerEnv } from '~/lib/env.server';
 import { supabaseAdmin } from '~/lib/supabase/server';
@@ -189,6 +190,10 @@ async function waitForDeployReady(deployId: string, token: string) {
 export async function action({ context, request }: ActionFunctionArgs) {
   if (request.method !== 'POST') {
     return Response.json({ error: 'Method Not Allowed' }, { status: 405 });
+  }
+
+  if (!FEATURE_FLAGS.netlifyDeploy) {
+    return Response.json({ error: '[RIDVAN-E1964] Netlify deploy is disabled for MVP', provider: 'netlify' }, { status: 404 });
   }
 
   const netlifyToken = getOptionalServerEnv('NETLIFY_TOKEN', context.cloudflare?.env);

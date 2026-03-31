@@ -1,6 +1,7 @@
 import { type ActionFunctionArgs } from '@remix-run/cloudflare';
 import { streamText as aiStreamText, convertToCoreMessages } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
+import { FEATURE_FLAGS } from '~/config/feature-flags';
 import { getAPIKey } from '~/lib/.server/llm/api-key';
 import { MAX_TOKENS } from '~/lib/.server/llm/constants';
 import { requireUserFromBearerToken } from '~/lib/brain/auth.server';
@@ -239,6 +240,10 @@ async function drainReadableStream(stream: ReadableStream) {
 export async function action({ request, context }: ActionFunctionArgs) {
   if (request.method !== 'POST') {
     return Response.json({ error: 'Method Not Allowed' }, { status: 405 });
+  }
+
+  if (!FEATURE_FLAGS.mentorHealth) {
+    return Response.json({ error: '[RIDVAN-E1360] Health analysis is disabled for MVP' }, { status: 404 });
   }
 
   try {
