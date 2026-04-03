@@ -1,11 +1,15 @@
 import { redirect, type ActionFunctionArgs, type LoaderFunctionArgs } from '@remix-run/cloudflare';
 import { Form, Link, useLoaderData } from '@remix-run/react';
 import { useState } from 'react';
-import { getOptionalServerEnv } from '~/lib/env.server';
+import { AdminNav } from '~/components/admin/AdminNav';
+import {
+  ADMIN_SESSION_VALUE,
+  buildAdminSessionCookie,
+  clearAdminSessionCookie,
+  getAdminSecret,
+  isAdminPageAuthenticated,
+} from '~/lib/server/admin-auth.server';
 import { supabaseAdmin } from '~/lib/supabase/server';
-
-const ADMIN_COOKIE = 'ridvan_admin_auth';
-const ADMIN_SESSION_VALUE = 'true';
 
 type ErrorLogRow = {
   id: string;
@@ -23,41 +27,6 @@ type LoaderData =
   | { authenticated: false; error: string | null }
   | { authenticated: true; error: null; logs: ErrorLogRow[]; filter: 'open' | 'all' };
 
-function getAdminSecret(context: LoaderFunctionArgs['context'] | ActionFunctionArgs['context']) {
-  return getOptionalServerEnv('ADMIN_SECRET', context.cloudflare?.env);
-}
-
-function parseCookies(request: Request) {
-  return Object.fromEntries(
-    request.headers
-      .get('cookie')
-      ?.split(';')
-      .map((part) => part.trim())
-      .filter(Boolean)
-      .map((part) => {
-        const index = part.indexOf('=');
-        return [part.slice(0, index), decodeURIComponent(part.slice(index + 1))];
-      }) ?? [],
-  );
-}
-
-function isAuthenticated(request: Request, adminSecret: string | undefined) {
-  if (!adminSecret) {
-    return false;
-  }
-
-  const cookies = parseCookies(request);
-  return cookies[ADMIN_COOKIE] === ADMIN_SESSION_VALUE;
-}
-
-function buildCookie(value: string, maxAge: number) {
-  return `${ADMIN_COOKIE}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`;
-}
-
-function clearCookie() {
-  return `${ADMIN_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
-}
-
 export async function action({ context, request }: ActionFunctionArgs) {
   const adminSecret = getAdminSecret(context);
   const formData = await request.formData();
@@ -65,12 +34,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
   if (intent === 'logout') {
     return redirect('/admin/errors', {
-      headers: { 'Set-Cookie': clearCookie() },
+      headers: { 'Set-Cookie': clearAdminSessionCookie() },
     });
   }
 
   if (intent === 'resolve') {
-    if (!isAuthenticated(request, adminSecret)) {
+    if (!isAdminPageAuthenticated(request, adminSecret)) {
       return redirect('/admin/errors?error=invalid_secret');
     }
 
@@ -90,7 +59,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   }
 
   return redirect('/admin/errors', {
-    headers: { 'Set-Cookie': buildCookie(ADMIN_SESSION_VALUE, 60 * 60 * 8) },
+    headers: { 'Set-Cookie': buildAdminSessionCookie(ADMIN_SESSION_VALUE, 60 * 60 * 8) },
   });
 }
 
@@ -99,7 +68,7 @@ export async function loader({ context, request }: LoaderFunctionArgs): Promise<
   const url = new URL(request.url);
   const error = url.searchParams.get('error') === 'invalid_secret' ? 'Invalid admin secret.' : null;
 
-  if (!isAuthenticated(request, adminSecret)) {
+  if (!isAdminPageAuthenticated(request, adminSecret)) {
     return Response.json({ authenticated: false, error } satisfies LoaderData);
   }
 
@@ -170,15 +139,9 @@ export default function AdminErrorsRoute() {
     <div className="min-h-screen bg-slate-950 text-slate-100 p-6">
       <div className="mx-auto max-w-7xl space-y-6">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <nav className="flex flex-wrap gap-4 text-sm text-sky-400">
-              <Link to="/admin" className="hover:underline">
-                Billing admin
-              </Link>
-              <span className="text-slate-500">|</span>
-              <span className="text-slate-200">Errors</span>
-            </nav>
-            <h1 className="mt-2 text-3xl font-semibold">Error logs</h1>
+          <div className="space-y-3">
+            <AdminNav />
+            <h1 className="text-3xl font-semibold">Error logs</h1>
             <p className="mt-2 text-sm text-slate-400">Senaste 100 raderna från Supabase (nyast först).</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">

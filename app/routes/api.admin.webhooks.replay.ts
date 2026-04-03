@@ -1,7 +1,7 @@
 import { type ActionFunctionArgs } from '@remix-run/cloudflare';
 import Stripe from 'stripe';
 import { markEventFailed, markEventProcessed } from '~/lib/billing/webhook-events.server';
-import { getOptionalServerEnv } from '~/lib/env.server';
+import { getAdminSecret, requireAdminApi } from '~/lib/server/admin-auth.server';
 import { captureError } from '~/lib/server/monitoring.server';
 import { PLANS, stripe } from '~/lib/stripe/config';
 import { supabaseAdmin } from '~/lib/supabase/server';
@@ -13,35 +13,6 @@ type FailedWebhookRow = {
   error: string | null;
   processed_at: string | null;
 };
-
-function parseCookies(request: Request) {
-  return Object.fromEntries(
-    request.headers
-      .get('cookie')
-      ?.split(';')
-      .map((part) => part.trim())
-      .filter(Boolean)
-      .map((part) => {
-        const index = part.indexOf('=');
-        return [part.slice(0, index), decodeURIComponent(part.slice(index + 1))];
-      }) ?? [],
-  );
-}
-
-function getAdminSecret(context: ActionFunctionArgs['context']) {
-  return getOptionalServerEnv('ADMIN_SECRET', context.cloudflare?.env);
-}
-
-function requireAdmin(request: Request, adminSecret: string | undefined) {
-  const authHeader = request.headers.get('authorization');
-  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
-  const cookies = parseCookies(request);
-  const hasAdminSession = cookies.ridvan_admin_auth === 'true';
-
-  if (!adminSecret || ((!token || token !== adminSecret) && !hasAdminSession)) {
-    throw Response.json({ error: '[RIDVAN-E1222] Unauthorized' }, { status: 401 });
-  }
-}
 
 async function processStripeEvent(event: Stripe.Event) {
   if (event.type === 'checkout.session.completed') {
@@ -123,7 +94,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
   }
 
   const adminSecret = getAdminSecret(context);
-  requireAdmin(request, adminSecret);
+
+  try {
+    requireAdminApi(request, adminSecret);
+  } catch (response) {
+    return response as Response;
+  }
 
   const contentType = request.headers.get('content-type') ?? '';
   let eventId: string | null = null;

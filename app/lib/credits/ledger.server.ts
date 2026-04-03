@@ -5,7 +5,7 @@ export type CreditLedgerEntry = {
   user_id: string;
   amount: number;
   balance_after: number;
-  type: 'deduction' | 'grant' | 'reset' | 'webhook' | 'free_signup' | 'topup';
+  type: 'deduction' | 'grant' | 'reset' | 'webhook' | 'free_signup' | 'topup' | 'manual_grant';
   description: string | null;
   reference_id: string | null;
   created_at: string;
@@ -15,7 +15,7 @@ export async function recordCreditTransaction(args: {
   userId: string;
   amount: number;
   balanceAfter: number;
-  type: 'deduction' | 'grant' | 'reset' | 'webhook' | 'free_signup' | 'topup';
+  type: 'deduction' | 'grant' | 'reset' | 'webhook' | 'free_signup' | 'topup' | 'manual_grant';
   description?: string;
   referenceId?: string;
 }) {
@@ -34,7 +34,7 @@ export async function recordCreditTransaction(args: {
 }
 
 export async function getUserCreditHistory(userId: string, limit = 50) {
-  const safeLimit = Number.isFinite(limit) ? Math.min(Math.max(Math.trunc(limit), 1), 200) : 50;
+  const safeLimit = Number.isFinite(limit) ? Math.min(Math.max(Math.trunc(limit), 1), 500) : 50;
 
   const { data, error } = await supabaseAdmin
     .from('credit_ledger')
