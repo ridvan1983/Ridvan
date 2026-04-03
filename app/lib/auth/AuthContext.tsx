@@ -7,7 +7,8 @@ interface AuthContextValue {
   session: Session | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string) => Promise<void>;
+  /** Returns Supabase session when email confirmation is off; otherwise session may be null until verify. */
+  signUp: (email: string, password: string) => Promise<{ user: User | null; session: Session | null }>;
   signOut: () => Promise<void>;
 }
 
@@ -69,11 +70,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       },
       signUp: async (email: string, password: string) => {
-        const { error } = await supabase.auth.signUp({ email, password });
+        const { data, error } = await supabase.auth.signUp({ email, password });
 
         if (error) {
           throw new Error(`[RIDVAN-E005] ${error.message}`);
         }
+
+        return {
+          user: data.user ?? null,
+          session: data.session ?? null,
+        };
       },
       signOut: async () => {
         const { error } = await supabase.auth.signOut();

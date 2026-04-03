@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '~/lib/auth/AuthContext';
+import TopUpModal from '~/components/credits/TopUpModal';
 
 interface CreditsResponse {
   plan: string;
@@ -15,6 +16,7 @@ export default function CreditDisplay() {
   const [credits, setCredits] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [hasError, setHasError] = useState(false);
+  const [topUpOpen, setTopUpOpen] = useState(false);
 
   useEffect(() => {
     if (!session?.access_token) {
@@ -80,8 +82,18 @@ export default function CreditDisplay() {
   }
 
   return (
-    <span className="text-xs text-bolt-elements-textSecondary whitespace-nowrap" title="Remaining credits">
-      {loading ? '...' : `⚡ ${credits ?? 0} credits`}
-    </span>
+    <>
+      <span className="inline-flex items-center gap-2 text-xs text-bolt-elements-textSecondary whitespace-nowrap">
+        <span title="Remaining credits">{loading ? '...' : `⚡ ${credits ?? 0} credits`}</span>
+        <button
+          type="button"
+          onClick={() => setTopUpOpen(true)}
+          className="rounded-md border border-bolt-elements-borderColor px-2 py-0.5 text-[11px] font-medium text-bolt-elements-textPrimary hover:bg-bolt-elements-background-depth-2"
+        >
+          Köp mer credits
+        </button>
+      </span>
+      <TopUpModal isOpen={topUpOpen} onClose={() => setTopUpOpen(false)} />
+    </>
   );
 }

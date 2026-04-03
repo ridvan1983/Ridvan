@@ -41,7 +41,18 @@ export function LoginPage() {
       if (mode === 'login') {
         await signIn(email, password);
       } else {
-        await signUp(email, password);
+        const signupResult = await signUp(email, password);
+        const token = signupResult.session?.access_token;
+        if (token) {
+          try {
+            await fetch('/api/credits/signup-bonus', {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${token}` },
+            });
+          } catch {
+            // Bonus is best-effort; user can retry via support if migration not applied
+          }
+        }
       }
 
       navigate(redirectTo);

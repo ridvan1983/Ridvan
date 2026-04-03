@@ -391,6 +391,30 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
   }, [searchParams, setSearchParams]);
 
   useEffect(() => {
+    const topupSessionId = searchParams.get('topup_session_id');
+    if (!topupSessionId?.trim()) {
+      return;
+    }
+
+    const refresh = () => {
+      window.dispatchEvent(new Event(CREDIT_REFRESH_EVENT));
+    };
+
+    refresh();
+    const t1 = window.setTimeout(refresh, 1500);
+    const t2 = window.setTimeout(refresh, 4000);
+
+    const next = new URLSearchParams(searchParams);
+    next.delete('topup_session_id');
+    setSearchParams(next, { replace: true });
+
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
     const projectIdParam = searchParams.get('projectId');
     const sessionIdParam = searchParams.get('sessionId');
 

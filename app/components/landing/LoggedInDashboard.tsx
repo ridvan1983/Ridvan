@@ -120,7 +120,7 @@ export function LoggedInDashboard({ user, accessToken, onSubmitPrompt }: LoggedI
           <button
             className="text-left rounded-lg px-3 py-2 hover:opacity-80"
             style={{ color: '#0A0A0A' }}
-            onClick={() => navigate('/chat?openMenu=1')}
+            onClick={() => navigate('/projects')}
           >
             Mina projekt
           </button>

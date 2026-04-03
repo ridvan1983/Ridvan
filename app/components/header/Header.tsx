@@ -67,7 +67,7 @@ export function Header() {
       </div>
 
       <nav className="ml-6 flex items-center gap-4 text-sm text-bolt-elements-textSecondary">
-        <a href="/chat?openMenu=1" className="hover:text-bolt-elements-textPrimary">
+        <a href="/projects" className="hover:text-bolt-elements-textPrimary">
           Mina projekt
         </a>
         <a href="/mentor" className="hover:text-bolt-elements-textPrimary inline-flex items-center gap-2">

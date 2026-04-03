@@ -5,7 +5,7 @@ export type CreditLedgerEntry = {
   user_id: string;
   amount: number;
   balance_after: number;
-  type: 'deduction' | 'grant' | 'reset' | 'webhook';
+  type: 'deduction' | 'grant' | 'reset' | 'webhook' | 'free_signup' | 'topup';
   description: string | null;
   reference_id: string | null;
   created_at: string;
@@ -15,7 +15,7 @@ export async function recordCreditTransaction(args: {
   userId: string;
   amount: number;
   balanceAfter: number;
-  type: 'deduction' | 'grant' | 'reset' | 'webhook';
+  type: 'deduction' | 'grant' | 'reset' | 'webhook' | 'free_signup' | 'topup';
   description?: string;
   referenceId?: string;
 }) {

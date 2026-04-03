@@ -3,6 +3,7 @@ import Stripe from 'stripe';
 import { isEventProcessed, markEventFailed, markEventProcessed } from '~/lib/billing/webhook-events.server';
 import { getOptionalServerEnv } from '~/lib/env.server';
 import { captureError } from '~/lib/server/monitoring.server';
+import { applyTopupCreditsFromCheckoutSession } from '~/lib/credits/topup.server';
 import { PLANS, stripe } from '~/lib/stripe/config';
 import { supabaseAdmin } from '~/lib/supabase/server';
 
@@ -52,7 +53,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
       const planId = session.metadata?.planId as keyof typeof PLANS | undefined;
       const plan = planId ? PLANS[planId] : undefined;
 
-      if (userId && planId && plan) {
+      if (session.mode === 'payment' && session.metadata?.kind === 'topup') {
+        await applyTopupCreditsFromCheckoutSession(session, context.cloudflare?.env);
+      } else if (session.mode === 'subscription' && userId && planId && plan) {
         await supabaseAdmin.from('subscriptions').upsert(
           {
             user_id: userId,
