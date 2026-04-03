@@ -4,6 +4,8 @@ export async function writeBrainEvent(args: {
   type: 'project.built' | 'project.files_changed' | 'project.published';
   payload: Record<string, unknown>;
   idempotencyKey?: string | null;
+  /** Optional — scopes proactive mentor triggers to the same session as /mentor chat. */
+  mentorSessionId?: string | null;
 }) {
   const res = await fetch('/api/brain/events', {
     method: 'POST',
@@ -16,6 +18,7 @@ export async function writeBrainEvent(args: {
       type: args.type,
       payload: args.payload,
       idempotencyKey: args.idempotencyKey ?? null,
+      mentorSessionId: args.mentorSessionId ?? undefined,
     }),
   });
 

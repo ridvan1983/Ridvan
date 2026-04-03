@@ -1,3 +1,7 @@
+import { parseMentorInsightPayload, type MentorInsightPayload } from '~/lib/mentor/proactive-message';
+
+export type { MentorInsightPayload };
+
 export type MentorAskAttachmentPayload = {
   filename: string;
   mimeType: string;
@@ -57,6 +61,7 @@ export type MentorStreamHandlers = {
 export type MentorStreamSuccess = {
   ok: true;
   reply: string;
+  insight: MentorInsightPayload | null;
   events: Array<{ type: string; payload: Record<string, unknown> }>;
   eventsWritten?: number;
 };
@@ -98,7 +103,13 @@ export async function mentorAskStream(
         const ev = row.events;
         const events = Array.isArray(ev) ? (ev as Array<{ type: string; payload: Record<string, unknown> }>) : [];
         const eventsWritten = typeof row.eventsWritten === 'number' ? row.eventsWritten : undefined;
-        return { ok: true, reply: row.reply, events, eventsWritten };
+        return {
+          ok: true,
+          reply: row.reply,
+          insight: parseMentorInsightPayload(row.insight),
+          events,
+          eventsWritten,
+        };
       }
     }
     const message =
@@ -115,6 +126,7 @@ export async function mentorAskStream(
   let buffer = '';
   let donePayload: {
     reply: string;
+    insight: MentorInsightPayload | null;
     events: Array<{ type: string; payload: Record<string, unknown> }>;
     eventsWritten?: number;
   } | null = null;
@@ -168,7 +180,16 @@ export async function mentorAskStream(
         if (!raw) {
           continue;
         }
-        let parsed: { t?: string; d?: string; reply?: string; events?: unknown; eventsWritten?: number; error?: string; message?: string };
+        let parsed: {
+          t?: string;
+          d?: string;
+          reply?: string;
+          insight?: unknown;
+          events?: unknown;
+          eventsWritten?: number;
+          error?: string;
+          message?: string;
+        };
         try {
           parsed = JSON.parse(raw) as typeof parsed;
         } catch {
@@ -180,6 +201,7 @@ export async function mentorAskStream(
         if (parsed.t === 'done' && typeof parsed.reply === 'string') {
           donePayload = {
             reply: parsed.reply,
+            insight: parseMentorInsightPayload(parsed.insight),
             events: Array.isArray(parsed.events) ? (parsed.events as Array<{ type: string; payload: Record<string, unknown> }>) : [],
             eventsWritten: typeof parsed.eventsWritten === 'number' ? parsed.eventsWritten : undefined,
           };
@@ -220,6 +242,7 @@ export async function mentorAskStream(
   return {
     ok: true,
     reply: donePayload.reply,
+    insight: donePayload.insight,
     events: donePayload.events,
     eventsWritten: donePayload.eventsWritten,
   };
@@ -239,7 +262,10 @@ export function logMentorStreamError(
   }).catch(() => undefined);
 }
 
-export async function runMentorBuilderSeed(accessToken: string, payload: { projectId: string; initialPrompt: string }) {
+export async function runMentorBuilderSeed(
+  accessToken: string,
+  payload: { projectId: string; initialPrompt: string; sessionId?: string; filePaths?: string[] },
+) {
   const res = await fetch('/api/brain/builder-seed', {
     method: 'POST',
     headers: {

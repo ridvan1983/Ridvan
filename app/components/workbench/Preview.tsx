@@ -2,6 +2,7 @@ import { useStore } from '@nanostores/react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { IconButton } from '~/components/ui/IconButton';
 import { writeBrainEvent } from '~/lib/brain/events.client';
+import { readMentorSessionIdForProject } from '~/lib/mentor/mentor-session-storage';
 import { collectTextFiles } from '~/lib/projects/snapshot.client';
 import { getProject } from '~/lib/projects/api.client';
 import { organismAccessToken, organismPreviewReadyAt, organismProjectId } from '~/lib/stores/organism';
@@ -164,6 +165,7 @@ export const Preview = memo(() => {
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const publishedLoggedRef = useRef<Set<string>>(new Set());
   const [activePreviewIndex, setActivePreviewIndex] = useState(0);
   const [isPortDropdownOpen, setIsPortDropdownOpen] = useState(false);
   const hasSelectedPreview = useRef(false);
@@ -221,8 +223,35 @@ export const Preview = memo(() => {
         preview_url: loadedUrl,
         port: activePreview?.port ?? null,
       },
+      mentorSessionId: readMentorSessionIdForProject(projectId) ?? undefined,
     }).catch(() => {});
   }, [activePreview?.baseUrl, activePreview?.port, iframeUrl]);
+
+  useEffect(() => {
+    if (deployStage !== 'live') {
+      return;
+    }
+    const url = resolvedLiveUrl?.trim();
+    if (!url || !projectId?.trim() || !accessToken) {
+      return;
+    }
+    const key = `${projectId}:${url}`;
+    if (publishedLoggedRef.current.has(key)) {
+      return;
+    }
+    publishedLoggedRef.current.add(key);
+    void writeBrainEvent({
+      accessToken,
+      projectId,
+      type: 'project.published',
+      idempotencyKey: `project.published:${projectId}:${url}`,
+      payload: {
+        live_url: url,
+        provider: deployProvider ?? 'vercel',
+      },
+      mentorSessionId: readMentorSessionIdForProject(projectId) ?? undefined,
+    }).catch(() => {});
+  }, [accessToken, deployProvider, deployStage, projectId, resolvedLiveUrl]);
 
   useEffect(() => {
     if (!activePreview) {

@@ -1,8 +1,10 @@
 import type { BrainEventInput } from '~/lib/brain/types';
+import { parseMentorInsightPayload, type MentorInsightPayload } from '~/lib/mentor/proactive-message';
 
 export interface MentorModelOutput {
   reply: string;
   events: BrainEventInput[];
+  insight: MentorInsightPayload | null;
 }
 
 function stripCodeFences(text: string) {
@@ -23,6 +25,28 @@ function extractFirstJsonObject(text: string) {
 }
 
 const RIDVAN_EVENTS_MARK = '\n---RIDVAN_EVENTS---\n';
+const RIDVAN_INSIGHT_MARK = '\n---RIDVAN_INSIGHT---\n';
+
+function parseInsightSection(tail: string): MentorInsightPayload | null {
+  const idx = tail.indexOf(RIDVAN_INSIGHT_MARK);
+  if (idx === -1) {
+    return null;
+  }
+  const jsonPart = tail.slice(idx + RIDVAN_INSIGHT_MARK.length).trim();
+  if (!jsonPart) {
+    return null;
+  }
+  try {
+    return parseMentorInsightPayload(JSON.parse(jsonPart) as unknown);
+  } catch {
+    return null;
+  }
+}
+
+function eventsSegmentOnly(afterEventsMark: string): string {
+  const idx = afterEventsMark.indexOf(RIDVAN_INSIGHT_MARK);
+  return (idx === -1 ? afterEventsMark : afterEventsMark.slice(0, idx)).trim();
+}
 
 function parseEventsArray(raw: unknown): BrainEventInput[] {
   if (!Array.isArray(raw)) {
@@ -56,7 +80,10 @@ export function parseMentorUnifiedOutput(text: string): MentorModelOutput {
   const idx = trimmed.indexOf(RIDVAN_EVENTS_MARK);
   if (idx !== -1) {
     const reply = trimmed.slice(0, idx).trim();
-    const jsonLine = trimmed.slice(idx + RIDVAN_EVENTS_MARK.length).trim();
+    const afterEvents = trimmed.slice(idx + RIDVAN_EVENTS_MARK.length);
+    const insight = parseInsightSection(afterEvents);
+    const eventsBlock = eventsSegmentOnly(afterEvents);
+    const jsonLine = eventsBlock.split('\n').map((l) => l.trim()).find(Boolean) ?? '';
     if (!reply) {
       throw new Error('[RIDVAN-E868] Mentor segmented output missing reply');
     }
@@ -74,13 +101,13 @@ export function parseMentorUnifiedOutput(text: string): MentorModelOutput {
       const obj = parsed as Record<string, unknown>;
       events = parseEventsArray(obj.events);
     }
-    return { reply, events };
+    return { reply, events, insight };
   }
 
   try {
     return parseMentorJson(trimmed);
   } catch {
-    return { reply: trimmed, events: [] };
+    return { reply: trimmed, events: [], insight: null };
   }
 }
 
@@ -92,12 +119,12 @@ export function parseMentorJson(text: string): MentorModelOutput {
   } catch {
     const extracted = extractFirstJsonObject(cleaned);
     if (!extracted) {
-      return { reply: cleaned.trim(), events: [] };
+      return { reply: cleaned.trim(), events: [], insight: null };
     }
     try {
       parsed = JSON.parse(extracted) as unknown;
     } catch {
-      return { reply: cleaned.trim(), events: [] };
+      return { reply: cleaned.trim(), events: [], insight: null };
     }
   }
 
@@ -115,5 +142,8 @@ export function parseMentorJson(text: string): MentorModelOutput {
 
   const events = parseEventsArray(eventsRaw ?? []);
 
-  return { reply, events };
+  const insightRaw = obj.insight;
+  const insight = parseMentorInsightPayload(insightRaw);
+
+  return { reply, events, insight };
 }

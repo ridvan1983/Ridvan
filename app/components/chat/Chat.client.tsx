@@ -26,6 +26,7 @@ import { cubicEasingFn } from '~/utils/easings';
 import { createScopedLogger, renderLogger } from '~/utils/logger';
 import { CREDIT_REFRESH_EVENT } from '~/components/credits/CreditDisplay';
 import { runMentorBuilderSeed } from '~/lib/mentor/api.client';
+import { readMentorSessionIdForProject } from '~/lib/mentor/mentor-session-storage';
 import OutOfCreditsModal from '~/components/credits/OutOfCreditsModal';
 import { BaseChat } from './BaseChat';
 import GenerationProgress from './GenerationProgress';
@@ -770,7 +771,12 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
 
     const priorUserMessageCount = messages.filter((m) => m.role === 'user').length;
     if (priorUserMessageCount === 0 && session?.access_token && ensured) {
-      void runMentorBuilderSeed(session.access_token, { projectId: ensured, initialPrompt: _input }).catch(() => undefined);
+      void runMentorBuilderSeed(session.access_token, {
+        projectId: ensured,
+        initialPrompt: _input,
+        sessionId: readMentorSessionIdForProject(ensured) ?? undefined,
+        filePaths: Object.keys(workbenchFiles).slice(0, 400),
+      }).catch(() => undefined);
     }
 
     const fileModifications = workbenchStore.getFileModifcations();

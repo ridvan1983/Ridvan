@@ -125,6 +125,8 @@ export function buildMentorSystemPrompt(args: {
     sampleFiles: string[];
   } | null;
   verticalContext?: MentorVerticalContext | null;
+  /** Last N mentor assistant turns, cleaned — inject so the model can echo prior wording. */
+  recentMentorReplySnippets?: string[];
 }) {
   const industryText = args.industryProfile
     ? `${args.industryProfile.normalizedIndustry}${args.industryProfile.subIndustry ? ` / ${args.industryProfile.subIndustry}` : ''} (confidence ${args.industryProfile.confidence})`
@@ -184,6 +186,11 @@ export function buildMentorSystemPrompt(args: {
   const priorDecisionText = (args.priorDecisions ?? []).length > 0 ? (args.priorDecisions ?? []).join(' | ') : 'none';
   const openQuestionText = (args.openQuestions ?? []).length > 0 ? (args.openQuestions ?? []).join(' | ') : 'none';
   const brainEventSummaryText = (args.brainEventsSummary ?? []).length > 0 ? (args.brainEventsSummary ?? []).join(' | ') : 'none';
+
+  const recentMentorSnippetBlock =
+    (args.recentMentorReplySnippets ?? []).length > 0
+      ? `SENASTE MENTOR-SVAR (minnesunderlag — använd aktivt i texten när det passar, t.ex. "Som vi diskuterade tidigare", "Du nämnde att", "Förra veckan landade vi i"):\n${(args.recentMentorReplySnippets ?? []).map((s, i) => `${i + 1}. ${s}`).join('\n')}`
+      : 'Inga utdrag ännu.';
 
   const hasSignals = args.state.currentSignals && Object.keys(args.state.currentSignals).length > 0;
   const hasStateSummaries = Boolean(
@@ -603,6 +610,8 @@ export function buildMentorSystemPrompt(args: {
 
     Mentor memory summary:
     ${args.memorySummary?.trim() || 'none'}
+
+    ${recentMentorSnippetBlock}
 
     Recent mentor session summaries:
     ${recentSessionSummaryText}

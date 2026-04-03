@@ -7,6 +7,12 @@ import { requireMentorAccess, noCreditsResponse } from '~/lib/mentor/access.serv
 import { generateMentorAiResponse } from '~/lib/mentor/ai-response.server';
 import { markMentorUnread, normalizeMentorEvents, writeAndIngestMentorEvents } from '~/lib/mentor/brain-events.server';
 import { analyzeMentorAttachments, buildAttachmentPromptContext, type MentorAttachmentReference } from '~/lib/mentor/file-analysis.server';
+import {
+  appendMentorInsightTrailer,
+  parseProactiveMentorStorage,
+  splitMentorInsightTrailer,
+  type MentorInsightPayload,
+} from '~/lib/mentor/proactive-message';
 import { buildMentorSystemPrompt } from '~/lib/mentor/prompt.server';
 import { buildMentorOutputFormatOverride } from '~/lib/mentor/prompts.server';
 import { generateWelcomeMessage } from '~/lib/mentor/welcome.server';
@@ -148,6 +154,13 @@ function buildProactiveIntelligenceSection(vertical: Awaited<ReturnType<typeof g
 
 function stripImplementationMarker(input: string) {
   return input.replace(/\[data-implement="true"[\s\S]*?\]$/m, '').trim();
+}
+
+function mentorContentSnippetForMemory(raw: string): string {
+  const pr = parseProactiveMentorStorage(raw);
+  const base = pr.triggerType ? pr.body : raw;
+  const { visible } = splitMentorInsightTrailer(base);
+  return stripImplementationMarker(visible).replace(/\s+/g, ' ').trim().slice(0, 420);
 }
 
 function summarizeProjectStatus(args: {
@@ -326,6 +339,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
     conversationMemory = buildConversationMemory([]);
   }
 
+  const mentorAssistantRows = (mentorHistoryRows ?? []).filter((r) => r.role === 'mentor');
+  const recentMentorReplySnippets = mentorAssistantRows.slice(-5).map((r) => mentorContentSnippetForMemory(r.content));
+
   const { count: existingAssistantMessagesCount } = await supabaseAdmin
     .from('mentor_messages')
     .select('*', { count: 'exact', head: true })
@@ -450,6 +466,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       attachmentAnalysisContext,
       latestSnapshotSummary: snapshotSummary,
       modelHint: complexity,
+      recentMentorReplySnippets,
     });
     const systemCore = systemInstruction
       ? `${baseSystem}
@@ -484,14 +501,15 @@ ${systemInstruction}`
       reply: string;
       events: Array<{ type: string; payload: Record<string, unknown>; idempotencyKey?: string | null; source?: unknown }>;
       rawText: string;
+      insight: MentorInsightPayload | null;
     }) => {
       const combinedReply = [prefixText.trimEnd(), generated.reply].filter((value) => value.trim().length > 0).join('\n\n');
 
-      let reply = combinedReply || generated.reply;
+      let reply = appendMentorInsightTrailer(combinedReply || generated.reply, generated.insight ?? null);
       try {
         reply = appendImplementationMarker(reply, projectTitle);
       } catch {
-        reply = combinedReply || generated.reply;
+        reply = appendMentorInsightTrailer(combinedReply || generated.reply, generated.insight ?? null);
       }
 
       const events = normalizeMentorEvents(generated.events);
@@ -511,20 +529,20 @@ ${systemInstruction}`
           stack: error instanceof Error ? error.stack : undefined,
           metadata: { stage: 'writeAndIngestMentorEvents', projectId },
         });
-        return { ok: false as const, error: messageText, reply, events };
+        return { ok: false as const, error: messageText, reply, events, insight: generated.insight ?? null };
       }
 
       const shouldChargeReply = reply.trim().length > 0;
       if (shouldChargeReply) {
         const deduction = await deductCredit(user.id, 'Mentor reply', 1);
         if (!deduction.success) {
-          return { ok: false as const, error: 'RIDVAN_NO_CREDITS', reply, events, noCredits: true as const };
+          return { ok: false as const, error: 'RIDVAN_NO_CREDITS', reply, events, noCredits: true as const, insight: generated.insight ?? null };
         }
       }
 
       await markMentorUnread({ userId: user.id, projectId, reply, eventCount: events.length });
 
-      return { ok: true as const, reply, events };
+      return { ok: true as const, reply, events, insight: generated.insight ?? null };
     };
 
     if (stream) {
@@ -583,6 +601,7 @@ ${systemInstruction}`
             send({
               t: 'done',
               reply: finalized.reply,
+              insight: finalized.insight ?? null,
               events: finalized.events,
               eventsWritten: finalized.events.length,
             });
@@ -605,7 +624,12 @@ ${systemInstruction}`
       });
     }
 
-    let generated: { reply: string; events: Array<{ type: string; payload: Record<string, unknown>; idempotencyKey?: string | null; source?: unknown }>; rawText: string };
+    let generated: {
+      reply: string;
+      events: Array<{ type: string; payload: Record<string, unknown>; idempotencyKey?: string | null; source?: unknown }>;
+      rawText: string;
+      insight: MentorInsightPayload | null;
+    };
     try {
       generated = await generateMentorAiResponse({
         apiKey,
@@ -638,6 +662,7 @@ ${systemInstruction}`
 
     return Response.json({
       reply: finalized.reply,
+      insight: finalized.insight ?? null,
       events: finalized.events,
       eventsWritten: finalized.events.length,
     });

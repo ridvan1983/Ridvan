@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { parseProactiveMentorStorage, splitMentorInsightTrailer } from '~/lib/mentor/proactive-message';
 import { MentorMessageBubble } from './MentorMessageBubble';
 import { DocumentCard, type MentorDocumentCard } from './DocumentCard';
+import { MentorInsightCard } from './MentorInsightCard';
 import { MentorRichText } from './MentorRichText';
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 72;
@@ -118,6 +120,14 @@ export function MentorMessageList(props: {
           const align = m.role === 'user' ? 'items-end' : 'items-start';
           const tsAlign = m.role === 'user' ? 'text-right' : 'text-left';
           const implementation = extractImplementationAction(m.content);
+          const isMentor = m.role === 'mentor';
+          const proactive = isMentor ? parseProactiveMentorStorage(implementation.visibleContent) : null;
+          const baseForSplit = isMentor && proactive?.triggerType ? proactive.body : implementation.visibleContent;
+          const { visible: bubbleMarkdown, insight: trailerInsight } = isMentor
+            ? splitMentorInsightTrailer(baseForSplit)
+            : { visible: implementation.visibleContent, insight: null };
+          const insightCard = isMentor ? proactive?.insight ?? trailerInsight : null;
+          const showProactiveLabel = isMentor && Boolean(proactive?.triggerType);
           const canImplement = m.role === 'mentor' && Boolean(implementation.prompt) && !m.documentCard && !m.priorityCard;
 
           const showStreamCursor = Boolean(
@@ -133,6 +143,21 @@ export function MentorMessageList(props: {
 
           return (
             <div key={m.id} className={`flex flex-col ${align}`}>
+              {showProactiveLabel ? (
+                <div className="mb-1 max-w-[85%] rounded-lg border border-violet-200/80 bg-gradient-to-r from-violet-50 to-fuchsia-50 px-3 py-1.5 text-xs font-semibold text-violet-900 shadow-sm">
+                  Mentor noterar:
+                </div>
+              ) : null}
+              {insightCard ? (
+                <div className="mb-2 max-w-[85%]">
+                  <MentorInsightCard
+                    type={insightCard.type}
+                    title={insightCard.title}
+                    description={insightCard.description}
+                    action={insightCard.action}
+                  />
+                </div>
+              ) : null}
               <MentorMessageBubble role={m.role} showMentorBrand={m.role === 'mentor'}>
                 {m.priorityCard ? (
                   <div className="rounded-2xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 p-4">
@@ -166,16 +191,16 @@ export function MentorMessageList(props: {
 
                 {typingInsideBubble ? <MentorTypingDots /> : null}
 
-                {!typingInsideBubble && implementation.visibleContent ? (
+                {!typingInsideBubble && bubbleMarkdown ? (
                   m.role === 'mentor' ? (
                     <div className="leading-relaxed">
-                      <MentorRichText content={implementation.visibleContent} />
+                      <MentorRichText content={bubbleMarkdown} />
                       {showStreamCursor ? (
                         <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-violet-500 align-middle" aria-hidden />
                       ) : null}
                     </div>
                   ) : (
-                    <div className="whitespace-pre-wrap leading-relaxed">{implementation.visibleContent}</div>
+                    <div className="whitespace-pre-wrap leading-relaxed">{bubbleMarkdown}</div>
                   )
                 ) : null}
 

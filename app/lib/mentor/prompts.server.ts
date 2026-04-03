@@ -88,9 +88,13 @@ export function buildMentorOutputFormatOverride(): string {
     3) Then ONE single line of JSON (no markdown fences) with this exact shape:
        {"events":[...]}
        Use the same event types and payload shapes as documented above. "reply" must NOT appear in this JSON — the reply is only the Markdown before the separator.
+    4) OPTIONAL: If you have a structured insight card for the user, add ONE blank line, then a line containing exactly: ---RIDVAN_INSIGHT---
+       Then ONE single line of JSON (no fences) with this exact shape:
+       {"type":"warning|opportunity|milestone|tip","title":"...","description":"...","action":"..."}
+       Use sparingly — only when it adds clear business value.
 
     If you absolutely cannot emit the separator (emergency fallback only), output legacy JSON:
-    {"reply":"...","events":[]}
+    {"reply":"...","events":[],"insight":null}
     as a single line — but prefer the Markdown + ---RIDVAN_EVENTS--- format always.
   `;
 }

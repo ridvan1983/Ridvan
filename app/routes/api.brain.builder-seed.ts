@@ -5,6 +5,7 @@ import { ingestBrainEventsById } from '~/lib/brain/ingest.server';
 import { normalizeIndustry } from '~/lib/vertical/taxonomy.server';
 import { getVerticalExpertContext, mapIndustryToExpertVertical } from '~/lib/vertical/expert.server';
 import { supabaseAdmin } from '~/lib/supabase/server';
+import { processMentorTriggersForBuilderSeed } from '~/lib/mentor/triggers-apply.server';
 
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== 'POST') {
@@ -13,9 +14,15 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const { user } = await requireUserFromBearerToken(request);
 
-  const body = (await request.json().catch(() => null)) as { projectId?: string; initialPrompt?: string } | null;
+  const body = (await request.json().catch(() => null)) as
+    | { projectId?: string; initialPrompt?: string; sessionId?: string; filePaths?: string[] }
+    | null;
   const projectId = body?.projectId;
   const initialPrompt = body?.initialPrompt?.trim();
+  const mentorSessionId = typeof body?.sessionId === 'string' && body.sessionId.trim().length > 0 ? body.sessionId.trim() : null;
+  const filePaths = Array.isArray(body?.filePaths)
+    ? body.filePaths.map((p) => (typeof p === 'string' ? p.trim() : '')).filter((p) => p.length > 0)
+    : [];
 
   if (!projectId || !initialPrompt) {
     return Response.json({ error: '[RIDVAN-E1781] Missing projectId or initialPrompt' }, { status: 400 });
@@ -65,6 +72,17 @@ export async function action({ request }: ActionFunctionArgs) {
 
   void ingestBrainEventsById(eventIds).catch((error) => {
     console.error('[RIDVAN-E1782] Builder mentor seed ingest failed', error);
+  });
+
+  void processMentorTriggersForBuilderSeed({
+    workspaceId: workspace.id,
+    projectId,
+    userId: user.id,
+    initialPrompt,
+    filePaths,
+    mentorSessionId,
+  }).catch((error) => {
+    console.error('[RIDVAN-E1805] Builder-seed mentor triggers failed', error);
   });
 
   return Response.json({ ok: true, wroteEvents: eventIds.length });

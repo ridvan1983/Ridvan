@@ -85,6 +85,7 @@ export async function generateMentorAiResponse(args: {
     return {
       reply: parsed.reply,
       events: Array.isArray(parsed.events) ? (parsed.events as ParsedMentorEvent[]) : [],
+      insight: parsed.insight ?? null,
       rawText: finalText,
     };
   } catch (error) {
