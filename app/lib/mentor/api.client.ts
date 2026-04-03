@@ -47,6 +47,130 @@ export async function mentorAsk(
   return json as { reply: string; events?: Array<{ type: string; payload: Record<string, unknown> }>; eventsWritten?: number };
 }
 
+export async function mentorAskStream(
+  accessToken: string,
+  payload: {
+    projectId: string;
+    message: string;
+    sessionId?: string;
+    attachments?: MentorAskAttachmentPayload[];
+    systemInstruction?: string;
+  },
+  handlers: { onDelta: (text: string) => void },
+): Promise<{ reply: string; events: Array<{ type: string; payload: Record<string, unknown> }>; eventsWritten?: number }> {
+  const res = await fetch('/api/mentor', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ ...payload, stream: true }),
+  });
+
+  if (!res.ok || !res.body) {
+    const asJson = (await res.json().catch(() => null)) as unknown;
+    if (asJson && typeof asJson === 'object' && 'reply' in asJson) {
+      const row = asJson as Record<string, unknown>;
+      if (typeof row.reply === 'string') {
+        const ev = row.events;
+        const events = Array.isArray(ev) ? (ev as Array<{ type: string; payload: Record<string, unknown> }>) : [];
+        const eventsWritten = typeof row.eventsWritten === 'number' ? row.eventsWritten : undefined;
+        return { reply: row.reply, events, eventsWritten };
+      }
+    }
+    const message =
+      asJson && typeof asJson === 'object' && 'error' in asJson && typeof (asJson as { error?: unknown }).error === 'string'
+        ? String((asJson as { error: string }).error)
+        : `[RIDVAN-E1788] Mentor stream failed (${res.status})`;
+    throw new Error(message);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let donePayload: {
+    reply: string;
+    events: Array<{ type: string; payload: Record<string, unknown> }>;
+    eventsWritten?: number;
+  } | null = null;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split('\n\n');
+    buffer = parts.pop() ?? '';
+    for (const part of parts) {
+      const line = part
+        .split('\n')
+        .map((l) => l.trim())
+        .find((l) => l.startsWith('data:'));
+      if (!line) {
+        continue;
+      }
+      const raw = line.replace(/^data:\s?/, '').trim();
+      if (!raw) {
+        continue;
+      }
+      let parsed: { t?: string; d?: string; reply?: string; events?: unknown; eventsWritten?: number; error?: string; message?: string };
+      try {
+        parsed = JSON.parse(raw) as typeof parsed;
+      } catch {
+        continue;
+      }
+      if (parsed.t === 'delta' && typeof parsed.d === 'string') {
+        handlers.onDelta(parsed.d);
+      }
+      if (parsed.t === 'done' && typeof parsed.reply === 'string') {
+        donePayload = {
+          reply: parsed.reply,
+          events: Array.isArray(parsed.events) ? (parsed.events as Array<{ type: string; payload: Record<string, unknown> }>) : [],
+          eventsWritten: typeof parsed.eventsWritten === 'number' ? parsed.eventsWritten : undefined,
+        };
+      }
+      if (parsed.t === 'error') {
+        const msg =
+          typeof parsed.message === 'string'
+            ? parsed.message
+            : typeof parsed.error === 'string'
+              ? parsed.error
+              : '[RIDVAN-E1789] Mentor stream error';
+        throw new Error(msg);
+      }
+    }
+  }
+
+  if (!donePayload) {
+    throw new Error('[RIDVAN-E1790] Mentor stream ended without done event');
+  }
+
+  return donePayload;
+}
+
+export async function runMentorBuilderSeed(accessToken: string, payload: { projectId: string; initialPrompt: string }) {
+  const res = await fetch('/api/brain/builder-seed', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const json = (await res.json().catch(() => null)) as unknown;
+  if (!res.ok) {
+    const message =
+      json && typeof json === 'object' && 'error' in json && typeof (json as { error?: unknown }).error === 'string'
+        ? String((json as { error: string }).error)
+        : `[RIDVAN-E1791] Builder seed failed (${res.status})`;
+    throw new Error(message);
+  }
+
+  return json as { ok: true; wroteEvents: number };
+}
+
 export async function generateMentorDocument(args: {
   accessToken: string;
   projectId: string;

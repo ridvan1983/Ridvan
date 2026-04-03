@@ -1,6 +1,7 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { MentorMessageBubble } from './MentorMessageBubble';
 import { DocumentCard, type MentorDocumentCard } from './DocumentCard';
+import { MentorRichText } from './MentorRichText';
 
 function extractImplementationAction(content: string) {
   const match = content.match(/\[data-implement="true"\s+data-prompt="([\s\S]*?)"\]$/m);
@@ -44,12 +45,19 @@ export function MentorMessageList(props: {
   onImplement?: (prompt: string, messageId: string) => void;
   implementingMessageId?: string | null;
   implementedMessageId?: string | null;
+  streamingMessageId?: string | null;
+  isStreamingAssistant?: boolean;
 }) {
   const endRef = useRef<HTMLDivElement | null>(null);
 
+  const scrollSignature = useMemo(
+    () => props.messages.map((m) => `${m.id}:${m.content?.length ?? 0}`).join('|'),
+    [props.messages],
+  );
+
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [props.messages.length, props.isTyping]);
+  }, [scrollSignature, props.isTyping, props.streamingMessageId, props.isStreamingAssistant]);
 
   return (
     <div className="flex-1 min-h-0 overflow-auto px-4 py-4">
@@ -60,9 +68,13 @@ export function MentorMessageList(props: {
           const implementation = extractImplementationAction(m.content);
           const canImplement = m.role === 'mentor' && Boolean(implementation.prompt) && !m.documentCard && !m.priorityCard;
 
+          const showStreamCursor = Boolean(
+            props.isStreamingAssistant && props.streamingMessageId === m.id && m.role === 'mentor',
+          );
+
           return (
             <div key={m.id} className={`flex flex-col ${align}`}>
-              <MentorMessageBubble role={m.role}>
+              <MentorMessageBubble role={m.role} showMentorBrand={m.role === 'mentor'}>
                 {m.priorityCard ? (
                   <div className="rounded-2xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 p-4">
                     <div className="text-sm font-semibold">{m.priorityCard.title}</div>
@@ -93,7 +105,18 @@ export function MentorMessageList(props: {
                   </div>
                 ) : null}
 
-                {implementation.visibleContent ? <div className="whitespace-pre-wrap leading-relaxed">{implementation.visibleContent}</div> : null}
+                {implementation.visibleContent ? (
+                  m.role === 'mentor' ? (
+                    <div className="leading-relaxed">
+                      <MentorRichText content={implementation.visibleContent} />
+                      {showStreamCursor ? (
+                        <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-violet-500 align-middle" aria-hidden />
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="whitespace-pre-wrap leading-relaxed">{implementation.visibleContent}</div>
+                  )
+                ) : null}
 
                 {canImplement ? (
                   <div className="mt-3">

@@ -1,6 +1,6 @@
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { streamText as aiStreamText, convertToCoreMessages } from 'ai';
-import { parseMentorJson } from '~/lib/mentor/parse.server';
+import { parseMentorUnifiedOutput } from '~/lib/mentor/parse.server';
 import { MAX_TOKENS } from '~/lib/.server/llm/constants';
 
 export type MentorPromptAttachmentAnalysis = {
@@ -22,9 +22,9 @@ export async function generateMentorAiResponse(args: {
   needsWebSearch: boolean;
   attachmentAnalyses: MentorPromptAttachmentAnalysis[];
   attachmentAnalysisContext: string | null;
+  onStreamDelta?: (chunk: string) => void | Promise<void>;
 }) {
   const anthropic = createAnthropic({ apiKey: args.apiKey });
-  let finalText = '';
 
   const userContent: Array<Record<string, unknown>> = [
     {
@@ -55,16 +55,33 @@ export async function generateMentorAiResponse(args: {
         content: userContent as any,
       },
     ]),
-    onFinish: async (event) => {
-      const { text } = event as { text: string };
-      finalText = text;
-    },
   });
 
-  await drainReadableStream(result.toAIStream());
+  let finalText = '';
+  if (args.onStreamDelta) {
+    const reader = result.textStream.getReader();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        if (typeof value === 'string' && value.length > 0) {
+          finalText += value;
+          await args.onStreamDelta(value);
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    finalText = (await result.text) || finalText;
+  } else {
+    await drainReadableStream(result.toAIStream());
+    finalText = await result.text;
+  }
 
   try {
-    const parsed = parseMentorJson(finalText);
+    const parsed = parseMentorUnifiedOutput(finalText);
     return {
       reply: parsed.reply,
       events: Array.isArray(parsed.events) ? (parsed.events as ParsedMentorEvent[]) : [],

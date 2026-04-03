@@ -25,6 +25,7 @@ import { fileModificationsToHTML } from '~/utils/diff';
 import { cubicEasingFn } from '~/utils/easings';
 import { createScopedLogger, renderLogger } from '~/utils/logger';
 import { CREDIT_REFRESH_EVENT } from '~/components/credits/CreditDisplay';
+import { runMentorBuilderSeed } from '~/lib/mentor/api.client';
 import OutOfCreditsModal from '~/components/credits/OutOfCreditsModal';
 import { BaseChat } from './BaseChat';
 import GenerationProgress from './GenerationProgress';
@@ -766,6 +767,11 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
     next.set('projectId', ensured);
     next.set('sessionId', ensuredSessionId);
     setSearchParams(next, { replace: true });
+
+    const priorUserMessageCount = messages.filter((m) => m.role === 'user').length;
+    if (priorUserMessageCount === 0 && session?.access_token && ensured) {
+      void runMentorBuilderSeed(session.access_token, { projectId: ensured, initialPrompt: _input }).catch(() => undefined);
+    }
 
     const fileModifications = workbenchStore.getFileModifcations();
     setShowOutOfCredits(false);

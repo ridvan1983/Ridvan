@@ -1,5 +1,7 @@
 import { stripIndents } from '~/utils/stripIndent';
 import type { BrainGeoProfile, BrainIndustryProfile, BrainMemoryEntry, BrainProjectState } from '~/lib/brain/types';
+import { buildMentorWorldClassPrelude } from '~/lib/mentor/prompts.server';
+import { getVerticalExpertContext, mapIndustryToExpertVertical } from '~/lib/vertical/expert.server';
 
 type VerticalDriver = {
   driver: string;
@@ -197,7 +199,32 @@ export function buildMentorSystemPrompt(args: {
     !hasSignals &&
     !hasStateSummaries;
 
+  const signalsObj = asObject(args.state.currentSignals);
+  const mentorSeed = asObject(signalsObj.mentor_builder_seed as Record<string, unknown>);
+  const builderSeedBlock =
+    mentorSeed && Object.keys(mentorSeed).length > 0 ? JSON.stringify(mentorSeed, null, 2) : 'none';
+
+  const expertKey = mapIndustryToExpertVertical(args.industryProfile?.normalizedIndustry);
+  const expertContextBlock = getVerticalExpertContext(expertKey);
+
+  const worldClassPrelude = buildMentorWorldClassPrelude({
+    verticalLabel: analyzedIndustry,
+    expertContextBlock,
+    projectTitle: args.projectTitle,
+    companyDisplayName: explicitCompanyName,
+    geoText,
+    verticalExpectedBusinessModel: args.verticalContext?.expectedBusinessModel ?? 'unknown',
+    projectStatusSummary: explicitProjectStatusSummary,
+    memorySummary: args.memorySummary?.trim() || 'inga tidigare mentor-samtal finns ännu',
+    priorDecisionsLine: priorDecisionText,
+    openQuestionsLine: openQuestionText,
+    brainEventsSummaryLine: brainEventSummaryText,
+    builderSeedBlock,
+  });
+
   return stripIndents`
+    ${worldClassPrelude}
+
     Du är en erfaren affärspartner och co-founder för ${explicitCompanyName}.
     Du känner till deras ${analyzedIndustry} i ${geoText}.
     Du minns att: ${args.memorySummary?.trim() || 'inga tidigare mentor-samtal finns ännu'}

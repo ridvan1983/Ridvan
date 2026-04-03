@@ -8,6 +8,9 @@ import { generateMentorAiResponse } from '~/lib/mentor/ai-response.server';
 import { markMentorUnread, normalizeMentorEvents, writeAndIngestMentorEvents } from '~/lib/mentor/brain-events.server';
 import { analyzeMentorAttachments, buildAttachmentPromptContext, type MentorAttachmentReference } from '~/lib/mentor/file-analysis.server';
 import { buildMentorSystemPrompt } from '~/lib/mentor/prompt.server';
+import { buildMentorOutputFormatOverride } from '~/lib/mentor/prompts.server';
+import { generateWelcomeMessage } from '~/lib/mentor/welcome.server';
+import { mapIndustryToExpertVertical } from '~/lib/vertical/expert.server';
 import { captureError, logError } from '~/lib/server/monitoring.server';
 import { supabaseAdmin } from '~/lib/supabase/server';
 import { getVerticalContext } from '~/lib/vertical/context.server';
@@ -147,20 +150,6 @@ function stripImplementationMarker(input: string) {
   return input.replace(/\[data-implement="true"[\s\S]*?\]$/m, '').trim();
 }
 
-function pickUserLanguage(message: string, acceptLanguage: string | null) {
-  const lower = message.toLowerCase();
-  const swedishSignals = [' jag ', ' du ', ' det ', ' och ', ' inte ', ' ska ', 'bolag', 'företag', 'kund'];
-  if (swedishSignals.some((signal) => lower.includes(signal.trim()) || lower.includes(signal))) {
-    return 'svenska';
-  }
-
-  if ((acceptLanguage ?? '').toLowerCase().includes('sv')) {
-    return 'svenska';
-  }
-
-  return 'english';
-}
-
 function summarizeProjectStatus(args: {
   projectTitle: string | null;
   snapshotSummary: {
@@ -245,39 +234,6 @@ function buildConversationMemory(messages: MentorMessageRow[]) {
   };
 }
 
-async function buildPersonalizedWelcome(args: {
-  projectTitle: string | null;
-  industryLabel: string;
-  geoLabel: string;
-  projectStatusSummary: string;
-  conversationMemory: ReturnType<typeof buildConversationMemory>;
-  brainEventsSummary: string[];
-  requestLanguage: string;
-}) {
-  const company = args.projectTitle ?? 'bolaget';
-  const brainEventText = args.brainEventsSummary.length > 0 ? args.brainEventsSummary.join(' | ') : 'inga större nya händelser ännu';
-  const latestDecision = args.conversationMemory.importantDecisions[0] ?? null;
-  const latestOpenQuestion = args.conversationMemory.openQuestions[args.conversationMemory.openQuestions.length - 1] ?? null;
-
-  if (args.requestLanguage === 'svenska') {
-    return [
-      `Hej! Jag har tänkt på ${company} sedan sist.`,
-      `Det jag ser nu är ${args.projectStatusSummary} i ${args.industryLabel} med fokus på ${args.geoLabel}.`,
-      `Det tydligaste jag reagerar på är ${brainEventText}${latestDecision ? `, särskilt eftersom ni redan lutat åt ${latestDecision}` : ''}.`,
-      `Idag hade jag prioriterat ett konkret steg som flyttar intäkt eller minskar risk direkt innan ni bygger mer.${latestOpenQuestion ? ` Senast lämnade vi också frågan öppen: ${latestOpenQuestion}` : ''}`,
-      'Vad vill du fokusera på?',
-    ].join(' ');
-  }
-
-  return [
-    `Hi! I've been thinking about ${company} since last time.`,
-    `What I see right now is ${args.projectStatusSummary} in ${args.industryLabel} with focus on ${args.geoLabel}.`,
-    `The clearest signal is ${brainEventText}${latestDecision ? `, especially because you were already leaning toward ${latestDecision}` : ''}.`,
-    `Today I would prioritize one concrete move that either drives revenue or lowers risk before building more.${latestOpenQuestion ? ` We also left this open last time: ${latestOpenQuestion}` : ''}`,
-    'What do you want to focus on?',
-  ].join(' ');
-}
-
 function buildBrainEventsSummary(activeEntries: BrainMemoryEntry[]) {
   return activeEntries
     .slice()
@@ -338,7 +294,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     return access.response;
   }
 
-  const { user, projectId, message, sessionId, systemInstruction, attachments } = access.value;
+  const { user, projectId, message, sessionId, systemInstruction, attachments, stream } = access.value;
 
   const workspace = await ensureBrainWorkspace(projectId, user.id);
   const brain = await readBrainContext({ projectId, userId: user.id });
@@ -408,7 +364,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
         sampleFiles: snapshotFileNames.slice(0, 25),
       }
     : null;
-  const requestLanguage = pickUserLanguage(message, request.headers.get('accept-language'));
   let projectStatusSummary = 'projektet är nytt och fortfarande i ett tidigt skede';
   let brainEventsSummary: string[] = [];
   try {
@@ -418,11 +373,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
     projectStatusSummary = 'projektet är nytt och fortfarande i ett tidigt skede';
     brainEventsSummary = [];
   }
-  const industryLabel = brain.industryProfile?.normalizedIndustry ?? 'okänd bransch';
-  const geoLabel = brain.geoProfile?.city
-    ? `${brain.geoProfile.city}, ${brain.geoProfile.countryCode}`
-    : brain.geoProfile?.countryCode ?? 'okänd marknad';
-
   let attachmentAnalyses: Awaited<ReturnType<typeof analyzeMentorAttachments>> = [];
   let attachmentAnalysisContext: string | null = null;
 
@@ -501,10 +451,160 @@ export async function action({ context, request }: ActionFunctionArgs) {
       latestSnapshotSummary: snapshotSummary,
       modelHint: complexity,
     });
-    const system = systemInstruction ? `${baseSystem}
+    const systemCore = systemInstruction
+      ? `${baseSystem}
 
 ONE-OFF SYSTEM INSTRUCTION:
-${systemInstruction}` : baseSystem;
+${systemInstruction}`
+      : baseSystem;
+    const system = `${systemCore}\n\n${buildMentorOutputFormatOverride()}`;
+
+    const shouldAddIntro = (existingAssistantMessagesCount ?? 0) === 0;
+    const intelligenceSection = shouldAddIntro ? buildProactiveIntelligenceSection(vertical) : '';
+    const expertKey = mapIndustryToExpertVertical(brain.industryProfile?.normalizedIndustry);
+    let proactiveWelcome = '';
+    if (shouldAddIntro) {
+      proactiveWelcome = generateWelcomeMessage(
+        { title: projectTitle },
+        vertical
+          ? {
+              normalizedIndustry: brain.industryProfile?.normalizedIndustry,
+              expectedBusinessModel: vertical.expectedBusinessModel,
+              geoNotes: vertical.geoNotes?.length ? vertical.geoNotes.join(' | ') : null,
+            }
+          : null,
+        expertKey,
+      );
+    }
+
+    const prefixBlocks = [proactiveWelcome, intelligenceSection].filter((value) => value.trim().length > 0);
+    const prefixText = prefixBlocks.length > 0 ? `${prefixBlocks.join('\n\n')}\n\n` : '';
+
+    const finalizeMentorReply = async (generated: {
+      reply: string;
+      events: Array<{ type: string; payload: Record<string, unknown>; idempotencyKey?: string | null; source?: unknown }>;
+      rawText: string;
+    }) => {
+      const combinedReply = [prefixText.trimEnd(), generated.reply].filter((value) => value.trim().length > 0).join('\n\n');
+
+      let reply = combinedReply || generated.reply;
+      try {
+        reply = appendImplementationMarker(reply, projectTitle);
+      } catch {
+        reply = combinedReply || generated.reply;
+      }
+
+      const events = normalizeMentorEvents(generated.events);
+
+      try {
+        await writeAndIngestMentorEvents({
+          workspaceId: workspace.id,
+          projectId,
+          userId: user.id,
+          events,
+        });
+      } catch (error) {
+        const messageText = error instanceof Error ? error.message : String(error ?? 'Unknown error');
+        logError(messageText, {
+          route: 'mentor',
+          userId: user.id,
+          stack: error instanceof Error ? error.stack : undefined,
+          metadata: { stage: 'writeAndIngestMentorEvents', projectId },
+        });
+        return { ok: false as const, error: messageText, reply, events };
+      }
+
+      const shouldChargeReply = reply.trim().length > 0;
+      if (shouldChargeReply) {
+        const deduction = await deductCredit(user.id, 'Mentor reply', 1);
+        if (!deduction.success) {
+          return { ok: false as const, error: 'RIDVAN_NO_CREDITS', reply, events, noCredits: true as const };
+        }
+      }
+
+      await markMentorUnread({ userId: user.id, projectId, reply, eventCount: events.length });
+
+      return { ok: true as const, reply, events };
+    };
+
+    if (stream) {
+      const encoder = new TextEncoder();
+      const readable = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          const send = (obj: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+          try {
+            if (prefixText) {
+              send({ t: 'delta', d: prefixText });
+            }
+
+            let generated: Awaited<ReturnType<typeof generateMentorAiResponse>>;
+            try {
+              generated = await generateMentorAiResponse({
+                apiKey,
+                modelId,
+                system,
+                message,
+                needsWebSearch,
+                attachmentAnalyses,
+                attachmentAnalysisContext,
+                onStreamDelta: (chunk) => {
+                  send({ t: 'delta', d: chunk });
+                },
+              });
+            } catch (error) {
+              const messageText = error instanceof Error ? error.message : String(error ?? 'Unknown error');
+              const [safeMessage, raw = ''] = messageText.split('||RAW||');
+              logError(safeMessage, {
+                route: 'mentor',
+                userId: user.id,
+                stack: error instanceof Error ? error.stack : undefined,
+                metadata: { stage: 'generateMentorAiResponse', projectId, rawSnippet: raw.slice(0, 2000) },
+              });
+              send({ t: 'error', error: safeMessage, raw });
+              controller.close();
+              return;
+            }
+
+            const finalized = await finalizeMentorReply(generated);
+            if (!finalized.ok) {
+              if ('noCredits' in finalized && finalized.noCredits) {
+                send({
+                  t: 'error',
+                  error: 'RIDVAN_NO_CREDITS',
+                  message: 'Du har inga krediter kvar. Uppgradera till PRO för obegränsad access.',
+                });
+              } else {
+                send({ t: 'error', error: finalized.error ?? 'Mentor finalize failed', reply: finalized.reply });
+              }
+              controller.close();
+              return;
+            }
+
+            send({
+              t: 'done',
+              reply: finalized.reply,
+              events: finalized.events,
+              eventsWritten: finalized.events.length,
+            });
+            controller.close();
+          } catch (outer) {
+            const messageText = outer instanceof Error ? outer.message : String(outer ?? 'Unknown error');
+            send({ t: 'error', error: messageText });
+            controller.close();
+          }
+        },
+      });
+
+      return new Response(readable, {
+        headers: {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache, no-transform',
+          Connection: 'keep-alive',
+          'X-Accel-Buffering': 'no',
+        },
+      });
+    }
+
     let generated: { reply: string; events: Array<{ type: string; payload: Record<string, unknown>; idempotencyKey?: string | null; source?: unknown }>; rawText: string };
     try {
       generated = await generateMentorAiResponse({
@@ -528,65 +628,18 @@ ${systemInstruction}` : baseSystem;
       return Response.json({ error: safeMessage, raw }, { status: 500 });
     }
 
-    const shouldAddIntro = (existingAssistantMessagesCount ?? 0) === 0;
-    const intelligenceSection = shouldAddIntro ? buildProactiveIntelligenceSection(vertical) : '';
-
-    let proactiveWelcome = '';
-    if (shouldAddIntro) {
-      try {
-        proactiveWelcome = await buildPersonalizedWelcome({
-          projectTitle,
-          industryLabel,
-          geoLabel,
-          projectStatusSummary,
-          conversationMemory,
-          brainEventsSummary,
-          requestLanguage,
-        });
-      } catch {
-        proactiveWelcome = '';
-      }
-    }
-
-    const combinedReply = [proactiveWelcome, intelligenceSection, generated.reply].filter((value) => value.trim().length > 0).join('\n\n');
-
-    let reply = combinedReply || generated.reply;
-    try {
-      reply = appendImplementationMarker(reply, projectTitle);
-    } catch {
-      reply = combinedReply || generated.reply;
-    }
-
-    const events = normalizeMentorEvents(generated.events);
-
-    try {
-      await writeAndIngestMentorEvents({
-        workspaceId: workspace.id,
-        projectId,
-        userId: user.id,
-        events,
-      });
-    } catch (error) {
-      const messageText = error instanceof Error ? error.message : String(error ?? 'Unknown error');
-      logError(messageText, {
-        route: 'mentor',
-        userId: user.id,
-        stack: error instanceof Error ? error.stack : undefined,
-        metadata: { stage: 'writeAndIngestMentorEvents', projectId },
-      });
-      return Response.json({ error: messageText, reply }, { status: 500 });
-    }
-
-    const shouldChargeReply = reply.trim().length > 0;
-    if (shouldChargeReply) {
-      const deduction = await deductCredit(user.id, 'Mentor reply', 1);
-      if (!deduction.success) {
+    const finalized = await finalizeMentorReply(generated);
+    if (!finalized.ok) {
+      if ('noCredits' in finalized && finalized.noCredits) {
         return noCreditsResponse();
       }
+      return Response.json({ error: finalized.error, reply: finalized.reply }, { status: 500 });
     }
 
-    await markMentorUnread({ userId: user.id, projectId, reply, eventCount: events.length });
-
-    return Response.json({ reply, events, eventsWritten: events.length });
+    return Response.json({
+      reply: finalized.reply,
+      events: finalized.events,
+      eventsWritten: finalized.events.length,
+    });
   }
 }

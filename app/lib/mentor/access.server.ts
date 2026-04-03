@@ -17,6 +17,7 @@ export type MentorAccessGrant = {
   sessionId: string;
   systemInstruction: string;
   attachments: MentorAttachmentReference[];
+  stream: boolean;
 };
 
 export function noCreditsResponse() {
@@ -53,6 +54,7 @@ export async function requireMentorAccess(args: {
         sessionId?: string;
         attachments?: MentorAttachmentReference[];
         systemInstruction?: string;
+        stream?: boolean;
       }
     | null;
 
@@ -61,6 +63,7 @@ export async function requireMentorAccess(args: {
   const sessionId = typeof body?.sessionId === 'string' && body.sessionId.trim().length > 0 ? body.sessionId.trim() : null;
   const systemInstruction = typeof body?.systemInstruction === 'string' ? body.systemInstruction.trim() : '';
   const attachments = Array.isArray(body?.attachments) ? body.attachments.filter(Boolean) : [];
+  const stream = Boolean(body?.stream);
 
   if (!projectId || !message || !sessionId) {
     return {
@@ -171,6 +174,7 @@ export async function requireMentorAccess(args: {
       sessionId,
       systemInstruction,
       attachments,
+      stream,
     },
   };
 }

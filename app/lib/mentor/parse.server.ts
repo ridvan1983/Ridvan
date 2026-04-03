@@ -22,6 +22,68 @@ function extractFirstJsonObject(text: string) {
   return text.slice(start, end + 1);
 }
 
+const RIDVAN_EVENTS_MARK = '\n---RIDVAN_EVENTS---\n';
+
+function parseEventsArray(raw: unknown): BrainEventInput[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw.map((e) => {
+    if (!e || typeof e !== 'object') {
+      throw new Error('[RIDVAN-E865] Mentor events array item is not an object');
+    }
+    const ev = e as Record<string, unknown>;
+    const type = typeof ev.type === 'string' ? ev.type.trim() : null;
+    const payload = ev.payload && typeof ev.payload === 'object' ? (ev.payload as Record<string, unknown>) : null;
+    const idempotencyKey = typeof ev.idempotencyKey === 'string' ? ev.idempotencyKey.trim() : null;
+    const source = typeof ev.source === 'string' ? (ev.source as any) : undefined;
+    if (!type || type.length === 0 || !payload) {
+      throw new Error('[RIDVAN-E866] Mentor event missing type/payload');
+    }
+    return { type, payload, idempotencyKey, source };
+  });
+}
+
+/**
+ * Supports (1) legacy full JSON {"reply","events"} or (2) markdown reply + ---RIDVAN_EVENTS--- + {"events":[]}.
+ */
+export function parseMentorUnifiedOutput(text: string): MentorModelOutput {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    throw new Error('[RIDVAN-E867] Mentor output empty');
+  }
+
+  const idx = trimmed.indexOf(RIDVAN_EVENTS_MARK);
+  if (idx !== -1) {
+    const reply = trimmed.slice(0, idx).trim();
+    const jsonLine = trimmed.slice(idx + RIDVAN_EVENTS_MARK.length).trim();
+    if (!reply) {
+      throw new Error('[RIDVAN-E868] Mentor segmented output missing reply');
+    }
+    let events: BrainEventInput[] = [];
+    if (jsonLine.length > 0) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(jsonLine) as unknown;
+      } catch {
+        throw new Error('[RIDVAN-E869] Mentor events JSON invalid after separator');
+      }
+      if (!parsed || typeof parsed !== 'object') {
+        throw new Error('[RIDVAN-E870] Mentor events JSON not an object');
+      }
+      const obj = parsed as Record<string, unknown>;
+      events = parseEventsArray(obj.events);
+    }
+    return { reply, events };
+  }
+
+  try {
+    return parseMentorJson(trimmed);
+  } catch {
+    return { reply: trimmed, events: [] };
+  }
+}
+
 export function parseMentorJson(text: string): MentorModelOutput {
   const cleaned = stripCodeFences(text);
   let parsed: unknown;
@@ -51,28 +113,7 @@ export function parseMentorJson(text: string): MentorModelOutput {
     throw new Error('[RIDVAN-E862] Mentor output missing reply');
   }
 
-  const events: BrainEventInput[] = (eventsRaw ?? []).map((e) => {
-    if (!e || typeof e !== 'object') {
-      throw new Error('[RIDVAN-E863] Mentor output event is not an object');
-    }
-
-    const ev = e as Record<string, unknown>;
-    const type = typeof ev.type === 'string' ? ev.type.trim() : null;
-    const payload = ev.payload && typeof ev.payload === 'object' ? (ev.payload as Record<string, unknown>) : null;
-    const idempotencyKey = typeof ev.idempotencyKey === 'string' ? ev.idempotencyKey.trim() : null;
-    const source = typeof ev.source === 'string' ? (ev.source as any) : undefined;
-
-    if (!type || type.length === 0 || !payload) {
-      throw new Error('[RIDVAN-E864] Mentor event missing type/payload');
-    }
-
-    return {
-      type,
-      payload,
-      idempotencyKey,
-      source,
-    };
-  });
+  const events = parseEventsArray(eventsRaw ?? []);
 
   return { reply, events };
 }

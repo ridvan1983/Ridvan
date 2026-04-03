@@ -6,7 +6,7 @@ import { FEATURE_FLAGS } from '~/config/feature-flags';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { listProjects } from '~/lib/projects/api.client';
 import type { Project } from '~/lib/projects/types';
-import { MentorMessageList, type MentorChatMessage } from '~/components/mentor/MentorMessageList';
+import { MentorChat, type MentorChatMessage } from '~/components/mentor/MentorChat';
 import { MentorMessageInput } from '~/components/mentor/MentorMessageInput';
 import { MentorTopBar } from '~/components/mentor/MentorTopBar';
 import { hydrateMentorUnread, setMentorUnread } from '~/lib/stores/mentor-unread';
@@ -14,6 +14,7 @@ import type { MentorDocumentFormat } from '~/components/mentor/DocumentCard';
 import { CREDIT_REFRESH_EVENT } from '~/components/credits/CreditDisplay';
 import {
   mentorAsk,
+  mentorAskStream,
   readMentorMessages,
   appendMentorMessage,
   readDailyPriority,
@@ -142,6 +143,7 @@ export default function MentorRoute() {
   const [hasStoredMentorMessages, setHasStoredMentorMessages] = useState(false);
   const [implementingMessageId, setImplementingMessageId] = useState<string | null>(null);
   const [implementedMessageId, setImplementedMessageId] = useState<string | null>(null);
+  const [streamingMentorMessageId, setStreamingMentorMessageId] = useState<string | null>(null);
 
   const autoIntroAttemptedRef = useRef<Set<string>>(new Set());
 
@@ -610,13 +612,32 @@ Håll det under 150 ord. Direkt och konkret. Aldrig generiskt.`;
     setThinkingText(attachmentsForRequest.length > 0 ? 'Läser dokumentet och analyserar...' : 'Analyserar...');
     setError('');
 
+    let streamId: string | null = null;
+
     try {
-      const res = await mentorAsk(accessToken, {
-        projectId: selectedProjectId,
-        message: text || 'Analysera den bifogade filen åt mig.',
-        sessionId: conversationSessionId,
-        attachments: attachmentsForRequest,
-      });
+      const sid = `mentor-stream-${Date.now()}`;
+      streamId = sid;
+      const streamCreatedAt = new Date().toISOString();
+      setMessages((prev) => [...prev, { id: sid, role: 'mentor', content: '', createdAt: streamCreatedAt }]);
+      setStreamingMentorMessageId(sid);
+      setIsThinking(false);
+
+      const res = await mentorAskStream(
+        accessToken,
+        {
+          projectId: selectedProjectId,
+          message: text || 'Analysera den bifogade filen åt mig.',
+          sessionId: conversationSessionId,
+          attachments: attachmentsForRequest,
+        },
+        {
+          onDelta: (d) => {
+            setMessages((prev) => prev.map((m) => (m.id === sid ? { ...m, content: m.content + d } : m)));
+          },
+        },
+      );
+
+      setStreamingMentorMessageId(null);
       setEventsWritten(typeof res.eventsWritten === 'number' ? res.eventsWritten : null);
 
       const mentorText = typeof res.reply === 'string' ? res.reply : '';
@@ -655,35 +676,23 @@ Håll det under 150 ord. Direkt och konkret. Aldrig generiskt.`;
         window.dispatchEvent(new Event(CREDIT_REFRESH_EVENT));
       }
 
-      const messagesToAppend: MentorChatMessage[] = [];
-
       if (docMessages.length > 0) {
         const trimmedReply = mentorText.trim();
         if (trimmedReply.length > 0) {
           docMessages[0] = { ...docMessages[0], content: trimmedReply };
         }
-        messagesToAppend.push(...docMessages);
-      } else if (mentorText.trim().length > 0) {
-        messagesToAppend.push({
-          id: `mentor-${Date.now()}`,
-          role: 'mentor',
-          content: mentorText,
-          createdAt: new Date().toISOString(),
+        setMessages((prev) => {
+          const without = prev.filter((m) => m.id !== sid);
+          return [...without, ...docMessages];
         });
-      }
 
-      if (messagesToAppend.length > 0) {
-        setMessages((prev) => [...prev, ...messagesToAppend]);
-
-        for (const m of messagesToAppend) {
+        for (const m of docMessages) {
           const storageText =
             typeof m.content === 'string' && m.content.trim().length > 0
               ? m.content
               : m.documentCard
                 ? `Dokument: ${m.documentCard.title}`
-                : m.priorityCard
-                  ? m.priorityCard.actionText
-                  : '';
+                : '';
 
           if (storageText.trim().length === 0) {
             continue;
@@ -699,6 +708,20 @@ Håll det under 150 ord. Direkt och konkret. Aldrig generiskt.`;
             // ignore
           });
         }
+      } else if (mentorText.trim().length > 0) {
+        setMessages((prev) => prev.map((m) => (m.id === sid ? { ...m, content: mentorText } : m)));
+
+        appendMentorMessage(accessToken, {
+          projectId: selectedProjectId,
+          role: 'mentor',
+          content: mentorText,
+          createdAt: streamCreatedAt,
+          sessionId: conversationSessionId,
+        }).catch(() => {
+          // ignore
+        });
+      } else {
+        setMessages((prev) => prev.filter((m) => m.id !== sid));
       }
 
       if (enableMilestones) {
@@ -744,6 +767,10 @@ Håll det under 150 ord. Direkt och konkret. Aldrig generiskt.`;
 
       void refreshBrain();
     } catch (e) {
+      if (streamId) {
+        setMessages((prev) => prev.filter((m) => m.id !== streamId));
+      }
+      setStreamingMentorMessageId(null);
       const msg = e instanceof Error ? e.message : 'Mentor request failed';
       setError(msg);
     } finally {
@@ -1080,10 +1107,12 @@ Håll det under 150 ord. Direkt och konkret. Aldrig generiskt.`;
               </div>
             ) : null}
 
-            <MentorMessageList
+            <MentorChat
               messages={messages}
-              isTyping={isThinking || isAutoIntroLoading}
+              isTyping={(isThinking || isAutoIntroLoading) && !streamingMentorMessageId}
               typingText={isAutoIntroLoading ? 'Mentor analyserar ditt projekt...' : thinkingText}
+              streamingMessageId={streamingMentorMessageId}
+              isStreamingAssistant={Boolean(streamingMentorMessageId)}
               onImplement={onImplementRecommendation}
               implementingMessageId={implementingMessageId}
               implementedMessageId={implementedMessageId}
