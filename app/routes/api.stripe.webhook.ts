@@ -2,7 +2,7 @@ import { type ActionFunctionArgs } from '@remix-run/cloudflare';
 import Stripe from 'stripe';
 import { isEventProcessed, markEventFailed, markEventProcessed } from '~/lib/billing/webhook-events.server';
 import { getOptionalServerEnv } from '~/lib/env.server';
-import { captureError } from '~/lib/server/monitoring.server';
+import { captureError, logError } from '~/lib/server/monitoring.server';
 import { applyTopupCreditsFromCheckoutSession } from '~/lib/credits/topup.server';
 import { PLANS, stripe } from '~/lib/stripe/config';
 import { supabaseAdmin } from '~/lib/supabase/server';
@@ -124,12 +124,23 @@ export async function action({ context, request }: ActionFunctionArgs) {
         route: 'api.stripe.webhook',
         extra: { eventId: event.id, eventType: event.type, stage: 'markEventFailed' },
       });
+      const markMsg = markError instanceof Error ? markError.message : String(markError);
+      logError(markMsg, {
+        route: 'stripe-webhook',
+        metadata: { eventId: event.id, eventType: event.type, stage: 'markEventFailed' },
+        stack: markError instanceof Error ? markError.stack : undefined,
+      });
       console.error('[RIDVAN-E1213] Failed to persist Stripe webhook failure', markError);
     }
 
     captureError(error, {
       route: 'api.stripe.webhook',
       extra: { eventId: event.id, eventType: event.type },
+    });
+    logError(message, {
+      route: 'stripe-webhook',
+      metadata: { eventId: event.id, eventType: event.type },
+      stack: error instanceof Error ? error.stack : undefined,
     });
 
     return Response.json({ error: `[RIDVAN-E1214] ${message}` }, { status: 500 });

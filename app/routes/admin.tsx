@@ -1,5 +1,5 @@
 import { redirect, type ActionFunctionArgs, type LoaderFunctionArgs } from '@remix-run/cloudflare';
-import { Form, useFetcher, useLoaderData, useSearchParams } from '@remix-run/react';
+import { Form, Link, useFetcher, useLoaderData, useSearchParams } from '@remix-run/react';
 import { useMemo, useState } from 'react';
 import { getOptionalServerEnv } from '~/lib/env.server';
 import { getUserCreditHistory, type CreditLedgerEntry } from '~/lib/credits/ledger.server';
@@ -303,7 +303,14 @@ export default function AdminRoute() {
       <div className="mx-auto max-w-7xl space-y-6">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-3xl font-semibold">Billing admin dashboard</h1>
+            <nav className="flex flex-wrap gap-4 text-sm text-sky-400">
+              <span className="text-slate-200">Billing admin</span>
+              <span className="text-slate-500">|</span>
+              <Link to="/admin/errors" className="hover:underline">
+                Errors
+              </Link>
+            </nav>
+            <h1 className="mt-2 text-3xl font-semibold">Billing admin dashboard</h1>
             <p className="mt-2 text-sm text-slate-400">Översikt över användare, subscriptions och credit ledger.</p>
           </div>
           <Form method="post">

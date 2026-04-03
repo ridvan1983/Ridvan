@@ -1,7 +1,7 @@
 import { type ActionFunctionArgs } from '@remix-run/cloudflare';
 import { getOptionalServerEnv } from '~/lib/env.server';
 import { checkRateLimit, deployRateLimit } from '~/lib/security/distributed-rate-limit.server';
-import { captureError } from '~/lib/server/monitoring.server';
+import { captureError, logError } from '~/lib/server/monitoring.server';
 import { supabaseAdmin } from '~/lib/supabase/server';
 
 const VERCEL_API_URL = 'https://api.vercel.com/v13/deployments';
@@ -297,22 +297,44 @@ export async function action({ context, request }: ActionFunctionArgs) {
       userId: user.id,
       extra: { stage: 'create_deployment', projectId, projectName: vercelProjectName },
     });
+    const msg = error instanceof Error ? error.message : String(error);
+    logError(msg, {
+      route: 'deploy',
+      userId: user.id,
+      stack: error instanceof Error ? error.stack : undefined,
+      metadata: { stage: 'create_deployment', projectId, projectName: vercelProjectName },
+    });
     throw error;
   }
 
   if (!vercelRes.ok || !deployment?.id) {
     const message = deployment?.error?.message || `[RIDVAN-E1936] Vercel deploy failed (${vercelRes.status})`;
+    logError(message, {
+      route: 'deploy',
+      userId: user.id,
+      metadata: { stage: 'vercel_http_error', projectId, httpStatus: vercelRes.status, vercelCode: deployment?.error?.code ?? null },
+    });
     return Response.json({ error: message, provider: 'vercel', status: 'error' }, { status: 500 });
   }
 
   const readyDeployment = await waitForDeploymentReady(deployment.id, vercelToken);
 
   if (!readyDeployment) {
+    logError('[RIDVAN-E1938] Vercel deployment timed out before becoming ready', {
+      route: 'deploy',
+      userId: user.id,
+      metadata: { stage: 'deploy_timeout', projectId, deploymentId: deployment.id },
+    });
     return Response.json({ error: '[RIDVAN-E1938] Vercel deployment timed out before becoming ready', provider: 'vercel', status: 'error' }, { status: 504 });
   }
 
   if (readyDeployment.readyState === 'ERROR' || readyDeployment.readyState === 'CANCELED') {
     const message = readyDeployment.error?.message || `[RIDVAN-E1939] Vercel deployment failed with state ${readyDeployment.readyState}`;
+    logError(message, {
+      route: 'deploy',
+      userId: user.id,
+      metadata: { stage: 'deploy_failed_state', projectId, readyState: readyDeployment.readyState, deploymentId: deployment.id },
+    });
     return Response.json({ error: message, provider: 'vercel', status: 'error' }, { status: 500 });
   }
 
@@ -324,6 +346,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const effectivePreviewUrl = deploymentUrl ?? aliasUrl ?? projectUrl ?? project.preview_url;
 
   if (!effectivePreviewUrl) {
+    logError('[RIDVAN-E1940] Vercel deployment became ready but returned no live URL', {
+      route: 'deploy',
+      userId: user.id,
+      metadata: { stage: 'no_preview_url', projectId, deploymentId: deployment.id },
+    });
     return Response.json({ error: '[RIDVAN-E1940] Vercel deployment became ready but returned no live URL', provider: 'vercel', status: 'error' }, { status: 500 });
   }
   const effectiveCustomDomain = null;
@@ -343,7 +370,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
     .eq('user_id', user.id);
 
   if (updateError) {
-    return Response.json({ error: `[RIDVAN-E1937] Failed to save preview URL: ${updateError.message}`, provider: 'vercel', status: 'error' }, { status: 500 });
+    const msg = `[RIDVAN-E1937] Failed to save preview URL: ${updateError.message}`;
+    logError(msg, {
+      route: 'deploy',
+      userId: user.id,
+      metadata: { stage: 'db_update_preview', projectId, previewUrl: effectivePreviewUrl },
+    });
+    return Response.json({ error: msg, provider: 'vercel', status: 'error' }, { status: 500 });
   }
 
   return Response.json({

@@ -8,7 +8,7 @@ import { generateMentorAiResponse } from '~/lib/mentor/ai-response.server';
 import { markMentorUnread, normalizeMentorEvents, writeAndIngestMentorEvents } from '~/lib/mentor/brain-events.server';
 import { analyzeMentorAttachments, buildAttachmentPromptContext, type MentorAttachmentReference } from '~/lib/mentor/file-analysis.server';
 import { buildMentorSystemPrompt } from '~/lib/mentor/prompt.server';
-import { captureError } from '~/lib/server/monitoring.server';
+import { captureError, logError } from '~/lib/server/monitoring.server';
 import { supabaseAdmin } from '~/lib/supabase/server';
 import { getVerticalContext } from '~/lib/vertical/context.server';
 import type { BrainMemoryEntry, BrainProjectState } from '~/lib/brain/types';
@@ -436,6 +436,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
       userId: user.id,
       extra: { stage: 'attachment_analysis', projectId, attachmentCount: attachments.length },
     });
+    logError(messageText, {
+      route: 'mentor',
+      userId: user.id,
+      stack: error instanceof Error ? error.stack : undefined,
+      metadata: { stage: 'attachment_analysis', projectId, attachmentCount: attachments.length },
+    });
     console.error('[RIDVAN-ATTACHMENT] api.mentor:attachment_analysis_failed', {
       projectId,
       attachmentCount: attachments.length,
@@ -513,6 +519,12 @@ ${systemInstruction}` : baseSystem;
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error ?? 'Unknown error');
       const [safeMessage, raw = ''] = messageText.split('||RAW||');
+      logError(safeMessage, {
+        route: 'mentor',
+        userId: user.id,
+        stack: error instanceof Error ? error.stack : undefined,
+        metadata: { stage: 'generateMentorAiResponse', projectId, rawSnippet: raw.slice(0, 2000) },
+      });
       return Response.json({ error: safeMessage, raw }, { status: 500 });
     }
 
@@ -556,6 +568,12 @@ ${systemInstruction}` : baseSystem;
       });
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error ?? 'Unknown error');
+      logError(messageText, {
+        route: 'mentor',
+        userId: user.id,
+        stack: error instanceof Error ? error.stack : undefined,
+        metadata: { stage: 'writeAndIngestMentorEvents', projectId },
+      });
       return Response.json({ error: messageText, reply }, { status: 500 });
     }
 
