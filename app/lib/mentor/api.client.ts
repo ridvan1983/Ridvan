@@ -47,6 +47,29 @@ export async function mentorAsk(
   return json as { reply: string; events?: Array<{ type: string; payload: Record<string, unknown> }>; eventsWritten?: number };
 }
 
+export type MentorStreamHandlers = {
+  /** Called once when the HTTP response has a readable SSE body (before first byte). */
+  onStreamConnected?: () => void;
+  onDelta: (text: string) => void;
+  onFirstDelta?: () => void;
+};
+
+export type MentorStreamSuccess = {
+  ok: true;
+  reply: string;
+  events: Array<{ type: string; payload: Record<string, unknown> }>;
+  eventsWritten?: number;
+};
+
+export type MentorStreamFailure = {
+  ok: false;
+  partialReply: string;
+  reason: 'http_error' | 'connection_lost' | 'incomplete_stream' | 'sse_error';
+  message: string;
+};
+
+export type MentorStreamResult = MentorStreamSuccess | MentorStreamFailure;
+
 export async function mentorAskStream(
   accessToken: string,
   payload: {
@@ -56,8 +79,8 @@ export async function mentorAskStream(
     attachments?: MentorAskAttachmentPayload[];
     systemInstruction?: string;
   },
-  handlers: { onDelta: (text: string) => void },
-): Promise<{ reply: string; events: Array<{ type: string; payload: Record<string, unknown> }>; eventsWritten?: number }> {
+  handlers: MentorStreamHandlers,
+): Promise<MentorStreamResult> {
   const res = await fetch('/api/mentor', {
     method: 'POST',
     headers: {
@@ -75,15 +98,17 @@ export async function mentorAskStream(
         const ev = row.events;
         const events = Array.isArray(ev) ? (ev as Array<{ type: string; payload: Record<string, unknown> }>) : [];
         const eventsWritten = typeof row.eventsWritten === 'number' ? row.eventsWritten : undefined;
-        return { reply: row.reply, events, eventsWritten };
+        return { ok: true, reply: row.reply, events, eventsWritten };
       }
     }
     const message =
       asJson && typeof asJson === 'object' && 'error' in asJson && typeof (asJson as { error?: unknown }).error === 'string'
         ? String((asJson as { error: string }).error)
         : `[RIDVAN-E1788] Mentor stream failed (${res.status})`;
-    throw new Error(message);
+    return { ok: false, partialReply: '', reason: 'http_error', message };
   }
+
+  handlers.onStreamConnected?.();
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -94,59 +119,124 @@ export async function mentorAskStream(
     eventsWritten?: number;
   } | null = null;
 
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) {
-      break;
+  let aggregatedFromDeltas = '';
+  let firstDeltaNotified = false;
+
+  const notifyDelta = (d: string) => {
+    if (d.length === 0) {
+      return;
     }
-    buffer += decoder.decode(value, { stream: true });
-    const parts = buffer.split('\n\n');
-    buffer = parts.pop() ?? '';
-    for (const part of parts) {
-      const line = part
-        .split('\n')
-        .map((l) => l.trim())
-        .find((l) => l.startsWith('data:'));
-      if (!line) {
-        continue;
-      }
-      const raw = line.replace(/^data:\s?/, '').trim();
-      if (!raw) {
-        continue;
-      }
-      let parsed: { t?: string; d?: string; reply?: string; events?: unknown; eventsWritten?: number; error?: string; message?: string };
+    aggregatedFromDeltas += d;
+    if (!firstDeltaNotified) {
+      firstDeltaNotified = true;
+      handlers.onFirstDelta?.();
+    }
+    handlers.onDelta(d);
+  };
+
+  try {
+    while (true) {
+      let readResult: ReadableStreamReadResult<Uint8Array>;
       try {
-        parsed = JSON.parse(raw) as typeof parsed;
-      } catch {
-        continue;
-      }
-      if (parsed.t === 'delta' && typeof parsed.d === 'string') {
-        handlers.onDelta(parsed.d);
-      }
-      if (parsed.t === 'done' && typeof parsed.reply === 'string') {
-        donePayload = {
-          reply: parsed.reply,
-          events: Array.isArray(parsed.events) ? (parsed.events as Array<{ type: string; payload: Record<string, unknown> }>) : [],
-          eventsWritten: typeof parsed.eventsWritten === 'number' ? parsed.eventsWritten : undefined,
+        readResult = await reader.read();
+      } catch (readErr) {
+        const msg = readErr instanceof Error ? readErr.message : String(readErr ?? 'read error');
+        return {
+          ok: false,
+          partialReply: aggregatedFromDeltas,
+          reason: 'connection_lost',
+          message: msg,
         };
       }
-      if (parsed.t === 'error') {
-        const msg =
-          typeof parsed.message === 'string'
-            ? parsed.message
-            : typeof parsed.error === 'string'
-              ? parsed.error
-              : '[RIDVAN-E1789] Mentor stream error';
-        throw new Error(msg);
+
+      const { value, done } = readResult;
+      if (done) {
+        break;
       }
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop() ?? '';
+      for (const part of parts) {
+        const line = part
+          .split('\n')
+          .map((l) => l.trim())
+          .find((l) => l.startsWith('data:'));
+        if (!line) {
+          continue;
+        }
+        const raw = line.replace(/^data:\s?/, '').trim();
+        if (!raw) {
+          continue;
+        }
+        let parsed: { t?: string; d?: string; reply?: string; events?: unknown; eventsWritten?: number; error?: string; message?: string };
+        try {
+          parsed = JSON.parse(raw) as typeof parsed;
+        } catch {
+          continue;
+        }
+        if (parsed.t === 'delta' && typeof parsed.d === 'string') {
+          notifyDelta(parsed.d);
+        }
+        if (parsed.t === 'done' && typeof parsed.reply === 'string') {
+          donePayload = {
+            reply: parsed.reply,
+            events: Array.isArray(parsed.events) ? (parsed.events as Array<{ type: string; payload: Record<string, unknown> }>) : [],
+            eventsWritten: typeof parsed.eventsWritten === 'number' ? parsed.eventsWritten : undefined,
+          };
+        }
+        if (parsed.t === 'error') {
+          const msg =
+            typeof parsed.message === 'string'
+              ? parsed.message
+              : typeof parsed.error === 'string'
+                ? parsed.error
+                : '[RIDVAN-E1789] Mentor stream error';
+          return {
+            ok: false,
+            partialReply: aggregatedFromDeltas,
+            reason: 'sse_error',
+            message: msg,
+          };
+        }
+      }
+    }
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // ignore
     }
   }
 
   if (!donePayload) {
-    throw new Error('[RIDVAN-E1790] Mentor stream ended without done event');
+    return {
+      ok: false,
+      partialReply: aggregatedFromDeltas,
+      reason: 'incomplete_stream',
+      message: '[RIDVAN-E1790] Mentor stream ended without done event',
+    };
   }
 
-  return donePayload;
+  return {
+    ok: true,
+    reply: donePayload.reply,
+    events: donePayload.events,
+    eventsWritten: donePayload.eventsWritten,
+  };
+}
+
+export function logMentorStreamError(
+  accessToken: string,
+  args: { message: string; metadata?: Record<string, unknown> },
+): void {
+  void fetch('/api/mentor/stream-log', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(args),
+  }).catch(() => undefined);
 }
 
 export async function runMentorBuilderSeed(accessToken: string, payload: { projectId: string; initialPrompt: string }) {

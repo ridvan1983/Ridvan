@@ -13,8 +13,8 @@ import { hydrateMentorUnread, setMentorUnread } from '~/lib/stores/mentor-unread
 import type { MentorDocumentFormat } from '~/components/mentor/DocumentCard';
 import { CREDIT_REFRESH_EVENT } from '~/components/credits/CreditDisplay';
 import {
-  mentorAsk,
   mentorAskStream,
+  logMentorStreamError,
   readMentorMessages,
   appendMentorMessage,
   readDailyPriority,
@@ -144,6 +144,12 @@ export default function MentorRoute() {
   const [implementingMessageId, setImplementingMessageId] = useState<string | null>(null);
   const [implementedMessageId, setImplementedMessageId] = useState<string | null>(null);
   const [streamingMentorMessageId, setStreamingMentorMessageId] = useState<string | null>(null);
+  const [awaitingFirstStreamToken, setAwaitingFirstStreamToken] = useState(false);
+  const [streamInterrupted, setStreamInterrupted] = useState<
+    null | { mode: 'chat'; mentorMessageId: string } | { mode: 'auto_intro' }
+  >(null);
+  const [autoIntroReplayToken, setAutoIntroReplayToken] = useState(0);
+  const lastChatStreamPayloadRef = useRef<null | { message: string; attachments: MentorAskAttachmentPayload[] }>(null);
 
   const autoIntroAttemptedRef = useRef<Set<string>>(new Set());
 
@@ -422,46 +428,112 @@ Gör följande i ditt första meddelande:
 5. Avsluta med EN konkret fråga — inte flera
 Håll det under 150 ord. Direkt och konkret. Aldrig generiskt.`;
 
-    void mentorAsk(accessToken, {
-      projectId: selectedProjectId,
-      message: 'Skapa första proaktiva kontakt för detta projekt.',
-      sessionId: conversationSessionId,
-      systemInstruction,
-    })
-      .then(async (res) => {
-        const mentorText = typeof res.reply === 'string' ? res.reply.trim() : '';
-        if (!mentorText) {
+    const introSid = `mentor-first-${selectedProjectId}`;
+    const introCreatedAt = new Date().toISOString();
+    let introStreamOpened = false;
+
+    void (async () => {
+      try {
+        const res = await mentorAskStream(
+          accessToken,
+          {
+            projectId: selectedProjectId,
+            message: 'Skapa första proaktiva kontakt för detta projekt.',
+            sessionId: conversationSessionId,
+            systemInstruction,
+          },
+          {
+            onStreamConnected: () => {
+              introStreamOpened = true;
+              setIsAutoIntroLoading(false);
+              setMessages((prev) => {
+                const filtered = prev.filter((message) => !(message.role === 'system' && message.id === `system-${selectedProjectId}`));
+                return [...filtered, { id: introSid, role: 'mentor' as const, content: '', createdAt: introCreatedAt }];
+              });
+              setStreamingMentorMessageId(introSid);
+              setAwaitingFirstStreamToken(true);
+            },
+            onFirstDelta: () => setAwaitingFirstStreamToken(false),
+            onDelta: (d) => {
+              setMessages((prev) => prev.map((m) => (m.id === introSid ? { ...m, content: m.content + d } : m)));
+            },
+          },
+        );
+
+        setAwaitingFirstStreamToken(false);
+        setStreamingMentorMessageId(null);
+
+        if (!res.ok) {
+          if (res.reason === 'http_error') {
+            autoIntroAttemptedRef.current.delete(selectedProjectId);
+            if (introStreamOpened) {
+              setMessages((prev) => prev.filter((m) => m.id !== introSid));
+            }
+            setError(res.message);
+          } else {
+            void logMentorStreamError(accessToken, {
+              message: res.message,
+              metadata: {
+                reason: res.reason,
+                projectId: selectedProjectId,
+                mode: 'auto_intro',
+                partialChars: res.partialReply.length,
+              },
+            });
+            const interruptSuffix = '\n\n(svar avbrutet)';
+            setMessages((prev) =>
+              prev.map((m) => {
+                if (m.id !== introSid) {
+                  return m;
+                }
+                const t = m.content.trim();
+                return { ...m, content: t ? `${t}${interruptSuffix}` : interruptSuffix.trim() };
+              }),
+            );
+            setStreamInterrupted({ mode: 'auto_intro' });
+            autoIntroAttemptedRef.current.delete(selectedProjectId);
+          }
           return;
         }
 
-        const createdAt = new Date().toISOString();
+        const mentorText = typeof res.reply === 'string' ? res.reply.trim() : '';
+        if (!mentorText) {
+          setMessages((prev) => prev.filter((m) => m.id !== introSid));
+          autoIntroAttemptedRef.current.delete(selectedProjectId);
+          return;
+        }
+
+        setMessages((prev) => prev.map((m) => (m.id === introSid ? { ...m, content: mentorText } : m)));
+
         await appendMentorMessage(accessToken, {
           projectId: selectedProjectId,
           role: 'mentor',
           content: mentorText,
-          createdAt,
+          createdAt: introCreatedAt,
           sessionId: conversationSessionId,
         });
 
         setHasStoredMentorMessages(true);
-        setMessages((prev) => {
-          const filtered = prev.filter((message) => !(message.role === 'system' && message.id === `system-${selectedProjectId}`));
-          return [
-            ...filtered,
-            {
-              id: `mentor-first-${selectedProjectId}`,
-              role: 'mentor',
-              content: mentorText,
-              createdAt,
-            },
-          ];
-        });
-      })
-      .catch(() => undefined)
-      .finally(() => {
+      } catch {
+        autoIntroAttemptedRef.current.delete(selectedProjectId);
+        if (introStreamOpened) {
+          setMessages((prev) => prev.filter((m) => m.id !== introSid));
+        }
+      } finally {
         setIsAutoIntroLoading(false);
-      });
-  }, [accessToken, brainDebug, conversationSessionId, hasLoadedMentorMessages, hasStoredMentorMessages, selectedProjectId]);
+        setAwaitingFirstStreamToken(false);
+        setStreamingMentorMessageId(null);
+      }
+    })();
+  }, [
+    accessToken,
+    autoIntroReplayToken,
+    brainDebug,
+    conversationSessionId,
+    hasLoadedMentorMessages,
+    hasStoredMentorMessages,
+    selectedProjectId,
+  ]);
 
   const onGenerateDailyPriority = async () => {
     if (!accessToken || !selectedProjectId) {
@@ -611,33 +683,78 @@ Håll det under 150 ord. Direkt och konkret. Aldrig generiskt.`;
     setIsThinking(true);
     setThinkingText(attachmentsForRequest.length > 0 ? 'Läser dokumentet och analyserar...' : 'Analyserar...');
     setError('');
+    setStreamInterrupted(null);
 
-    let streamId: string | null = null;
+    const messageStr = text || 'Analysera den bifogade filen åt mig.';
+    lastChatStreamPayloadRef.current = { message: messageStr, attachments: attachmentsForRequest };
+
+    const sid = `mentor-stream-${Date.now()}`;
+    const streamCreatedAt = new Date().toISOString();
+    let chatStreamOpened = false;
 
     try {
-      const sid = `mentor-stream-${Date.now()}`;
-      streamId = sid;
-      const streamCreatedAt = new Date().toISOString();
-      setMessages((prev) => [...prev, { id: sid, role: 'mentor', content: '', createdAt: streamCreatedAt }]);
-      setStreamingMentorMessageId(sid);
-      setIsThinking(false);
-
       const res = await mentorAskStream(
         accessToken,
         {
           projectId: selectedProjectId,
-          message: text || 'Analysera den bifogade filen åt mig.',
+          message: messageStr,
           sessionId: conversationSessionId,
           attachments: attachmentsForRequest,
         },
         {
+          onStreamConnected: () => {
+            chatStreamOpened = true;
+            setMessages((prev) => [...prev, { id: sid, role: 'mentor', content: '', createdAt: streamCreatedAt }]);
+            setStreamingMentorMessageId(sid);
+            setAwaitingFirstStreamToken(true);
+            setIsThinking(false);
+          },
+          onFirstDelta: () => setAwaitingFirstStreamToken(false),
           onDelta: (d) => {
             setMessages((prev) => prev.map((m) => (m.id === sid ? { ...m, content: m.content + d } : m)));
           },
         },
       );
 
+      setAwaitingFirstStreamToken(false);
+
+      if (!res.ok) {
+        setStreamingMentorMessageId(null);
+        if (res.reason === 'http_error') {
+          if (chatStreamOpened) {
+            setMessages((prev) => prev.filter((m) => m.id !== sid));
+          }
+          setError(res.message);
+          setIsThinking(false);
+          return;
+        }
+
+        void logMentorStreamError(accessToken, {
+          message: res.message,
+          metadata: {
+            reason: res.reason,
+            projectId: selectedProjectId,
+            mode: 'chat',
+            partialChars: res.partialReply.length,
+          },
+        });
+
+        const interruptSuffix = '\n\n(svar avbrutet)';
+        setMessages((prev) =>
+          prev.map((m) => {
+            if (m.id !== sid) {
+              return m;
+            }
+            const t = m.content.trim();
+            return { ...m, content: t ? `${t}${interruptSuffix}` : interruptSuffix.trim() };
+          }),
+        );
+        setStreamInterrupted({ mode: 'chat', mentorMessageId: sid });
+        return;
+      }
+
       setStreamingMentorMessageId(null);
+      lastChatStreamPayloadRef.current = null;
       setEventsWritten(typeof res.eventsWritten === 'number' ? res.eventsWritten : null);
 
       const mentorText = typeof res.reply === 'string' ? res.reply : '';
@@ -767,12 +884,275 @@ Håll det under 150 ord. Direkt och konkret. Aldrig generiskt.`;
 
       void refreshBrain();
     } catch (e) {
-      if (streamId) {
-        setMessages((prev) => prev.filter((m) => m.id !== streamId));
-      }
+      setAwaitingFirstStreamToken(false);
       setStreamingMentorMessageId(null);
-      const msg = e instanceof Error ? e.message : 'Mentor request failed';
-      setError(msg);
+      if (chatStreamOpened) {
+        void logMentorStreamError(accessToken, {
+          message: e instanceof Error ? e.message : String(e ?? 'Mentor stream unexpected error'),
+          metadata: { projectId: selectedProjectId, mode: 'chat', unexpected: true },
+        });
+        const interruptSuffix = '\n\n(svar avbrutet)';
+        setMessages((prev) =>
+          prev.map((m) => {
+            if (m.id !== sid) {
+              return m;
+            }
+            const t = m.content.trim();
+            return { ...m, content: t ? `${t}${interruptSuffix}` : interruptSuffix.trim() };
+          }),
+        );
+        setStreamInterrupted({ mode: 'chat', mentorMessageId: sid });
+      } else {
+        const msg = e instanceof Error ? e.message : 'Mentor request failed';
+        setError(msg);
+      }
+    } finally {
+      setIsSending(false);
+      setIsThinking(false);
+      setThinkingText('Analyserar...');
+    }
+  };
+
+  const retryInterruptedMentorStream = async () => {
+    if (!accessToken || !selectedProjectId || !streamInterrupted || !conversationSessionId) {
+      return;
+    }
+
+    if (streamInterrupted.mode === 'auto_intro') {
+      setStreamInterrupted(null);
+      setError('');
+      const introSid = `mentor-first-${selectedProjectId}`;
+      setMessages((prev) => prev.filter((m) => m.id !== introSid));
+      setAutoIntroReplayToken((t) => t + 1);
+      return;
+    }
+
+    const replayId = streamInterrupted.mentorMessageId;
+    const p = lastChatStreamPayloadRef.current;
+    if (!p) {
+      setStreamInterrupted(null);
+      return;
+    }
+
+    setStreamInterrupted(null);
+    setError('');
+    setIsSending(true);
+    setIsThinking(true);
+    setThinkingText(p.attachments.length > 0 ? 'Läser dokumentet och analyserar...' : 'Analyserar...');
+
+    const retryCreatedAt = new Date().toISOString();
+    let retryOpened = false;
+
+    try {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === replayId ? { ...m, content: '', createdAt: retryCreatedAt } : m)),
+      );
+
+      const res = await mentorAskStream(
+        accessToken,
+        {
+          projectId: selectedProjectId,
+          message: p.message,
+          sessionId: conversationSessionId,
+          attachments: p.attachments,
+        },
+        {
+          onStreamConnected: () => {
+            retryOpened = true;
+            setStreamingMentorMessageId(replayId);
+            setAwaitingFirstStreamToken(true);
+            setIsThinking(false);
+          },
+          onFirstDelta: () => setAwaitingFirstStreamToken(false),
+          onDelta: (d) => {
+            setMessages((prev) => prev.map((m) => (m.id === replayId ? { ...m, content: m.content + d } : m)));
+          },
+        },
+      );
+
+      setAwaitingFirstStreamToken(false);
+
+      if (!res.ok) {
+        setStreamingMentorMessageId(null);
+        if (res.reason === 'http_error') {
+          if (retryOpened) {
+            setMessages((prev) => prev.filter((m) => m.id !== replayId));
+          }
+          setError(res.message);
+          setIsThinking(false);
+          return;
+        }
+
+        void logMentorStreamError(accessToken, {
+          message: res.message,
+          metadata: {
+            reason: res.reason,
+            projectId: selectedProjectId,
+            mode: 'chat_retry',
+            partialChars: res.partialReply.length,
+          },
+        });
+
+        const interruptSuffix = '\n\n(svar avbrutet)';
+        setMessages((prev) =>
+          prev.map((m) => {
+            if (m.id !== replayId) {
+              return m;
+            }
+            const t = m.content.trim();
+            return { ...m, content: t ? `${t}${interruptSuffix}` : interruptSuffix.trim() };
+          }),
+        );
+        setStreamInterrupted({ mode: 'chat', mentorMessageId: replayId });
+        return;
+      }
+
+      setStreamingMentorMessageId(null);
+      lastChatStreamPayloadRef.current = null;
+      setEventsWritten(typeof res.eventsWritten === 'number' ? res.eventsWritten : null);
+
+      const mentorText = typeof res.reply === 'string' ? res.reply : '';
+      const events = Array.isArray(res.events) ? res.events : [];
+
+      const docMessages: MentorChatMessage[] = [];
+      for (const ev of events) {
+        if (String(ev.type).trim() !== 'document.ready') {
+          continue;
+        }
+
+        const payload = ev.payload ?? {};
+        const title = typeof payload.title === 'string' ? payload.title : 'Document';
+        const documentType = typeof payload.documentType === 'string' ? payload.documentType : 'document';
+        const content = typeof payload.content === 'string' ? payload.content : '';
+        const formatsRaw = Array.isArray(payload.formats) ? payload.formats : [];
+        const formats = formatsRaw
+          .map((f) => String(f).toLowerCase().trim())
+          .filter((f): f is MentorDocumentFormat => f === 'pdf' || f === 'docx' || f === 'xlsx' || f === 'pptx');
+
+        docMessages.push({
+          id: `doc-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          role: 'mentor',
+          content: '',
+          createdAt: new Date().toISOString(),
+          documentCard: {
+            title,
+            documentType,
+            formats: formats.length > 0 ? formats : ['pdf'],
+            content,
+          },
+        });
+      }
+
+      if (mentorText.trim().length > 0 || events.some((ev) => String(ev.type).trim() === 'document.ready')) {
+        window.dispatchEvent(new Event(CREDIT_REFRESH_EVENT));
+      }
+
+      if (docMessages.length > 0) {
+        const trimmedReply = mentorText.trim();
+        if (trimmedReply.length > 0) {
+          docMessages[0] = { ...docMessages[0], content: trimmedReply };
+        }
+        setMessages((prev) => {
+          const without = prev.filter((m) => m.id !== replayId);
+          return [...without, ...docMessages];
+        });
+
+        for (const m of docMessages) {
+          const storageText =
+            typeof m.content === 'string' && m.content.trim().length > 0
+              ? m.content
+              : m.documentCard
+                ? `Dokument: ${m.documentCard.title}`
+                : '';
+
+          if (storageText.trim().length === 0) {
+            continue;
+          }
+
+          appendMentorMessage(accessToken, {
+            projectId: selectedProjectId,
+            role: 'mentor',
+            content: storageText,
+            createdAt: m.createdAt,
+            sessionId: conversationSessionId,
+          }).catch(() => undefined);
+        }
+      } else if (mentorText.trim().length > 0) {
+        setMessages((prev) => prev.map((m) => (m.id === replayId ? { ...m, content: mentorText } : m)));
+
+        appendMentorMessage(accessToken, {
+          projectId: selectedProjectId,
+          role: 'mentor',
+          content: mentorText,
+          createdAt: retryCreatedAt,
+          sessionId: conversationSessionId,
+        }).catch(() => undefined);
+      } else {
+        setMessages((prev) => prev.filter((m) => m.id !== replayId));
+      }
+
+      if (enableMilestones) {
+        runMilestoneCheck(accessToken, selectedProjectId)
+          .then((milestoneRes) => {
+            const items = Array.isArray(milestoneRes.milestones) ? milestoneRes.milestones : [];
+            if (items.length === 0) {
+              return;
+            }
+            setMessages((prev) => [
+              ...prev,
+              ...items.map((m) => ({
+                id: `milestone-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                role: 'mentor' as const,
+                content: String(m.message ?? ''),
+                createdAt: new Date().toISOString(),
+              })),
+            ]);
+          })
+          .catch(() => undefined);
+      }
+
+      const refreshBrain = async () => {
+        const delays = [200, 500, 900];
+        for (const delay of delays) {
+          await new Promise((r) => setTimeout(r, delay));
+          try {
+            const next = await readBrainState(accessToken, selectedProjectId);
+            setBrainPreview(next);
+            readBrainDebug(accessToken, selectedProjectId)
+              .then(setBrainDebug)
+              .catch(() => {
+                setBrainDebug(null);
+              });
+            return;
+          } catch {
+            // ignore
+          }
+        }
+      };
+
+      void refreshBrain();
+    } catch (e) {
+      setAwaitingFirstStreamToken(false);
+      setStreamingMentorMessageId(null);
+      if (retryOpened) {
+        void logMentorStreamError(accessToken, {
+          message: e instanceof Error ? e.message : String(e ?? 'Mentor stream unexpected error'),
+          metadata: { projectId: selectedProjectId, mode: 'chat_retry', unexpected: true },
+        });
+        const interruptSuffix = '\n\n(svar avbrutet)';
+        setMessages((prev) =>
+          prev.map((m) => {
+            if (m.id !== replayId) {
+              return m;
+            }
+            const t = m.content.trim();
+            return { ...m, content: t ? `${t}${interruptSuffix}` : interruptSuffix.trim() };
+          }),
+        );
+        setStreamInterrupted({ mode: 'chat', mentorMessageId: replayId });
+      } else {
+        setError(e instanceof Error ? e.message : 'Mentor request failed');
+      }
     } finally {
       setIsSending(false);
       setIsThinking(false);
@@ -1113,6 +1493,7 @@ Håll det under 150 ord. Direkt och konkret. Aldrig generiskt.`;
               typingText={isAutoIntroLoading ? 'Mentor analyserar ditt projekt...' : thinkingText}
               streamingMessageId={streamingMentorMessageId}
               isStreamingAssistant={Boolean(streamingMentorMessageId)}
+              awaitingFirstStreamToken={awaitingFirstStreamToken}
               onImplement={onImplementRecommendation}
               implementingMessageId={implementingMessageId}
               implementedMessageId={implementedMessageId}
@@ -1133,6 +1514,19 @@ Håll det under 150 ord. Direkt och konkret. Aldrig generiskt.`;
               <div className="mx-auto w-full max-w-3xl">
                 {error ? (
                   <div className="mb-3 rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300">{error}</div>
+                ) : null}
+
+                {streamInterrupted ? (
+                  <div className="mb-3 flex justify-center">
+                    <button
+                      type="button"
+                      disabled={isSending}
+                      onClick={() => void retryInterruptedMentorStream()}
+                      className="rounded-full border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 px-4 py-2 text-xs font-medium text-bolt-elements-textSecondary transition hover:border-violet-300 hover:text-violet-800 disabled:opacity-50"
+                    >
+                      Försök igen
+                    </button>
+                  </div>
                 ) : null}
 
                 {verticalNeedsGeo ? (

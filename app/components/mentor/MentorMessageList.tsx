@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MentorMessageBubble } from './MentorMessageBubble';
 import { DocumentCard, type MentorDocumentCard } from './DocumentCard';
 import { MentorRichText } from './MentorRichText';
+
+const SCROLL_BOTTOM_THRESHOLD_PX = 72;
 
 function extractImplementationAction(content: string) {
   const match = content.match(/\[data-implement="true"\s+data-prompt="([\s\S]*?)"\]$/m);
@@ -12,6 +14,16 @@ function extractImplementationAction(content: string) {
   const prompt = match[1]?.replace(/&quot;/g, '"').trim() ?? null;
   const visibleContent = content.replace(match[0], '').trim();
   return { visibleContent, prompt };
+}
+
+function MentorTypingDots() {
+  return (
+    <div className="flex items-center gap-1.5 py-0.5" role="status" aria-label="Mentor skriver">
+      <span className="h-2 w-2 shrink-0 rounded-full bg-violet-500 opacity-90 animate-pulse" />
+      <span className="h-2 w-2 shrink-0 rounded-full bg-violet-500 opacity-75 animate-pulse [animation-delay:180ms]" />
+      <span className="h-2 w-2 shrink-0 rounded-full bg-violet-500 opacity-60 animate-pulse [animation-delay:360ms]" />
+    </div>
+  );
 }
 
 export interface MentorChatMessage {
@@ -47,21 +59,61 @@ export function MentorMessageList(props: {
   implementedMessageId?: string | null;
   streamingMessageId?: string | null;
   isStreamingAssistant?: boolean;
+  awaitingFirstStreamToken?: boolean;
 }) {
   const endRef = useRef<HTMLDivElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [pinnedToBottom, setPinnedToBottom] = useState(true);
+  const [showJumpHint, setShowJumpHint] = useState(false);
 
   const scrollSignature = useMemo(
     () => props.messages.map((m) => `${m.id}:${m.content?.length ?? 0}`).join('|'),
     [props.messages],
   );
 
+  const recalcPinned = useCallback(() => {
+    const el = rootRef.current;
+    if (!el) {
+      return;
+    }
+    const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const next = gap <= SCROLL_BOTTOM_THRESHOLD_PX;
+    setPinnedToBottom(next);
+    if (next) {
+      setShowJumpHint(false);
+    }
+  }, []);
+
+  const onScroll = useCallback(() => {
+    recalcPinned();
+  }, [recalcPinned]);
+
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [scrollSignature, props.isTyping, props.streamingMessageId, props.isStreamingAssistant]);
+    recalcPinned();
+  }, [scrollSignature, props.messages.length, recalcPinned]);
+
+  useEffect(() => {
+    if (pinnedToBottom) {
+      requestAnimationFrame(() => {
+        endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      });
+    } else {
+      setShowJumpHint(true);
+    }
+  }, [scrollSignature, props.isTyping, props.streamingMessageId, props.awaitingFirstStreamToken, pinnedToBottom]);
+
+  const jumpToLatest = useCallback(() => {
+    setPinnedToBottom(true);
+    setShowJumpHint(false);
+    requestAnimationFrame(() => {
+      endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    });
+  }, []);
 
   return (
-    <div className="flex-1 min-h-0 overflow-auto px-4 py-4">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <div ref={rootRef} className="min-h-0 flex-1 overflow-auto px-4 py-4" onScroll={onScroll}>
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
         {props.messages.map((m) => {
           const align = m.role === 'user' ? 'items-end' : 'items-start';
           const tsAlign = m.role === 'user' ? 'text-right' : 'text-left';
@@ -70,6 +122,13 @@ export function MentorMessageList(props: {
 
           const showStreamCursor = Boolean(
             props.isStreamingAssistant && props.streamingMessageId === m.id && m.role === 'mentor',
+          );
+
+          const typingInsideBubble = Boolean(
+            props.awaitingFirstStreamToken &&
+              props.streamingMessageId === m.id &&
+              m.role === 'mentor' &&
+              m.content.length === 0,
           );
 
           return (
@@ -105,7 +164,9 @@ export function MentorMessageList(props: {
                   </div>
                 ) : null}
 
-                {implementation.visibleContent ? (
+                {typingInsideBubble ? <MentorTypingDots /> : null}
+
+                {!typingInsideBubble && implementation.visibleContent ? (
                   m.role === 'mentor' ? (
                     <div className="leading-relaxed">
                       <MentorRichText content={implementation.visibleContent} />
@@ -141,21 +202,30 @@ export function MentorMessageList(props: {
 
         {props.isTyping ? (
           <div className="flex flex-col items-start">
-            <MentorMessageBubble role="mentor">
-              <div className="flex items-center gap-3 text-sm text-bolt-elements-textSecondary">
-                <div className="flex items-center gap-1" aria-hidden="true">
-                  <span className="h-2 w-2 rounded-full bg-current animate-pulse" />
-                  <span className="h-2 w-2 rounded-full bg-current animate-pulse [animation-delay:120ms]" />
-                  <span className="h-2 w-2 rounded-full bg-current animate-pulse [animation-delay:240ms]" />
-                </div>
-                <div className="whitespace-pre-wrap leading-relaxed">{props.typingText ?? 'Analyserar...'}</div>
-              </div>
+            <MentorMessageBubble role="mentor" showMentorBrand>
+              <MentorTypingDots />
+              {props.typingText ? (
+                <div className="mt-2 text-sm text-bolt-elements-textSecondary">{props.typingText}</div>
+              ) : null}
             </MentorMessageBubble>
           </div>
         ) : null}
 
         <div ref={endRef} />
+        </div>
       </div>
+
+      {showJumpHint && !pinnedToBottom ? (
+        <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center">
+          <button
+            type="button"
+            onClick={jumpToLatest}
+            className="pointer-events-auto rounded-full border border-[#E8E6E1] bg-white/95 px-4 py-1.5 text-xs font-medium text-[#374151] shadow-md backdrop-blur-sm transition hover:bg-violet-50"
+          >
+            ↓ Ny aktivitet
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

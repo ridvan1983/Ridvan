@@ -11,6 +11,7 @@ export function MentorChat(props: {
   typingText?: string;
   streamingMessageId?: string | null;
   isStreamingAssistant?: boolean;
+  awaitingFirstStreamToken?: boolean;
   onImplement?: (prompt: string, messageId: string) => void;
   implementingMessageId?: string | null;
   implementedMessageId?: string | null;
@@ -22,6 +23,7 @@ export function MentorChat(props: {
       typingText={props.typingText}
       streamingMessageId={props.streamingMessageId}
       isStreamingAssistant={props.isStreamingAssistant}
+      awaitingFirstStreamToken={props.awaitingFirstStreamToken}
       onImplement={props.onImplement}
       implementingMessageId={props.implementingMessageId}
       implementedMessageId={props.implementedMessageId}
