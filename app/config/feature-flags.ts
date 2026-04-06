@@ -5,7 +5,7 @@ export const FEATURE_FLAGS = {
   mentorHealthCheckIn: false,
   mentorMilestones: false,
   mentorDailyPriority: false,
-  documentGeneration: false,
+  documentGeneration: true,
   weeklyDigest: false,
 } as const;
 

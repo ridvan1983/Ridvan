@@ -78,6 +78,7 @@
     "react-toastify": "^10.0.5",
     "rehype-raw": "^7.0.0",
     "rehype-sanitize": "^6.0.0",
+    "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.0",
     "remix-island": "^0.2.0",
     "remix-utils": "^7.6.0",

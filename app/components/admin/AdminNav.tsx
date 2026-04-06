@@ -6,6 +6,7 @@ const LINKS: Array<{ to: string; label: string }> = [
   { to: '/admin/errors', label: 'Errors' },
   { to: '/admin/webhooks', label: 'Webhooks' },
   { to: '/admin/jobs', label: 'Jobs' },
+  { to: '/admin/mentor', label: 'Mentor' },
 ];
 
 function linkActive(pathname: string, to: string) {

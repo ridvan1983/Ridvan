@@ -1,7 +1,6 @@
 import { stripIndents } from '~/utils/stripIndent';
 import type { BrainGeoProfile, BrainIndustryProfile, BrainMemoryEntry, BrainProjectState } from '~/lib/brain/types';
 import { buildMentorWorldClassPrelude } from '~/lib/mentor/prompts.server';
-import { getVerticalExpertContext, mapIndustryToExpertVertical } from '~/lib/vertical/expert.server';
 
 type VerticalDriver = {
   driver: string;
@@ -127,6 +126,12 @@ export function buildMentorSystemPrompt(args: {
   verticalContext?: MentorVerticalContext | null;
   /** Last N mentor assistant turns, cleaned — inject so the model can echo prior wording. */
   recentMentorReplySnippets?: string[];
+  /** Structured decision / pivot / goal / learning history for this project. */
+  deepMemorySummary?: string | null;
+  /** Optional cross-project pattern summary when user has multiple projects. */
+  crossProjectPatterns?: string | null;
+  /** Accept-Language or similar hint for the model (prelude context). */
+  languageHint?: string | null;
 }) {
   const industryText = args.industryProfile
     ? `${args.industryProfile.normalizedIndustry}${args.industryProfile.subIndustry ? ` / ${args.industryProfile.subIndustry}` : ''} (confidence ${args.industryProfile.confidence})`
@@ -176,10 +181,6 @@ export function buildMentorSystemPrompt(args: {
     return status === 'done' || status === 'completed' || achieved === true;
   });
   const priorDecisions = args.activeEntries.filter((entry) => entry.kind !== 'goal' && entry.kind !== 'priority' && entry.kind !== 'challenge');
-  const verticalRevenueDrivers = args.verticalContext?.revenueDrivers ?? [];
-  const verticalFailurePatterns = args.verticalContext?.failurePatterns ?? [];
-  const verticalModules = args.verticalContext?.modules ?? [];
-  const verticalInsights = args.verticalContext?.insights ?? [];
   const explicitCompanyName = args.companyName?.trim() || analyzedBusinessName;
   const explicitProjectStatusSummary = args.projectStatusSummary?.trim() || 'unknown';
   const recentSessionSummaryText = (args.recentSessionSummaries ?? []).length > 0 ? (args.recentSessionSummaries ?? []).join('\n') : 'none';
@@ -191,6 +192,13 @@ export function buildMentorSystemPrompt(args: {
     (args.recentMentorReplySnippets ?? []).length > 0
       ? `SENASTE MENTOR-SVAR (minnesunderlag — använd aktivt i texten när det passar, t.ex. "Som vi diskuterade tidigare", "Du nämnde att", "Förra veckan landade vi i"):\n${(args.recentMentorReplySnippets ?? []).map((s, i) => `${i + 1}. ${s}`).join('\n')}`
       : 'Inga utdrag ännu.';
+
+  const deepMemoryBlock =
+    args.deepMemorySummary?.trim() ||
+    'Ingen spår besluts-historik ännu — när användaren uttrycker beslut, pivot eller mål, logga det via mentor.memory.*-events enligt OUTPUT FORMAT.';
+  const crossProjectBlock = args.crossProjectPatterns?.trim()
+    ? `Mönster och kontext från användarens andra projekt (hypoteser — inte fakta om detta bolag):\n${args.crossProjectPatterns.trim()}`
+    : '';
 
   const hasSignals = args.state.currentSignals && Object.keys(args.state.currentSignals).length > 0;
   const hasStateSummaries = Boolean(
@@ -211,22 +219,41 @@ export function buildMentorSystemPrompt(args: {
   const builderSeedBlock =
     mentorSeed && Object.keys(mentorSeed).length > 0 ? JSON.stringify(mentorSeed, null, 2) : 'none';
 
-  const expertKey = mapIndustryToExpertVertical(args.industryProfile?.normalizedIndustry);
-  const expertContextBlock = getVerticalExpertContext(expertKey);
+  const projectDescriptionParts = [
+    explicitProjectStatusSummary !== 'unknown' ? explicitProjectStatusSummary : null,
+    analyzedWhatTheySell.length > 0 ? `Erbjudande: ${formatList(analyzedWhatTheySell)}` : null,
+    analyzedTargetAudience ? `Målgrupp: ${analyzedTargetAudience}` : null,
+    geoText !== 'unknown' ? `Marknad: ${geoText}` : null,
+  ].filter((value): value is string => Boolean(value));
+  const projectDescription = projectDescriptionParts.join(' · ');
+
+  const brainSummaryParts = [
+    args.state.primaryGoalSummary?.trim() && `Mål: ${args.state.primaryGoalSummary.trim()}`,
+    args.state.topPrioritySummary?.trim() && `Prioritet: ${args.state.topPrioritySummary.trim()}`,
+    args.state.mainChallengeSummary?.trim() && `Utmaning: ${args.state.mainChallengeSummary.trim()}`,
+    args.state.currentStage?.trim() && `Fas: ${args.state.currentStage.trim()}`,
+    args.state.currentBusinessModel?.trim() && `Affärsmodell: ${args.state.currentBusinessModel.trim()}`,
+    builderSeedBlock !== 'none' ? `Builder-seed finns i brain (signals).` : null,
+  ].filter((value): value is string => Boolean(value));
+  const brainSummaryForPrelude = brainSummaryParts.join(' · ');
+
+  const languageHint = args.languageHint?.trim() || '';
+
+  const snapshotForPrompt =
+    args.latestSnapshotSummary != null
+      ? JSON.stringify({
+          version: args.latestSnapshotSummary.version,
+          createdAt: args.latestSnapshotSummary.createdAt,
+          title: args.latestSnapshotSummary.title,
+        })
+      : 'none';
 
   const worldClassPrelude = buildMentorWorldClassPrelude({
-    verticalLabel: analyzedIndustry,
-    expertContextBlock,
-    projectTitle: args.projectTitle,
-    companyDisplayName: explicitCompanyName,
-    geoText,
-    verticalExpectedBusinessModel: args.verticalContext?.expectedBusinessModel ?? 'unknown',
-    projectStatusSummary: explicitProjectStatusSummary,
-    memorySummary: args.memorySummary?.trim() || 'inga tidigare mentor-samtal finns ännu',
-    priorDecisionsLine: priorDecisionText,
-    openQuestionsLine: openQuestionText,
-    brainEventsSummaryLine: brainEventSummaryText,
-    builderSeedBlock,
+    projectName: args.projectTitle?.trim() || explicitCompanyName,
+    projectDescription,
+    vertical: analyzedIndustry,
+    brainSummary: brainSummaryForPrelude,
+    language: languageHint,
   });
 
   return stripIndents`
@@ -245,8 +272,8 @@ export function buildMentorSystemPrompt(args: {
     Builder = hands. Mentor = brain.
 
     IDENTITY:
-    You are not an assistant. You are a co-founder who knows this company deeply.
-    You have been in every meeting, read every document, seen every decision.
+    You are not an assistant. You are a co-founder who advises based only on what appears in Brain, builder context, conversation history, and (when used) web search — not on imagined meetings or activities.
+    You never claim you witnessed something unless it is explicitly recorded in that context.
     You speak like a trusted advisor — direct, warm, specific, never generic.
 
     MEMORY (read from Brain context before every response):
@@ -259,13 +286,13 @@ export function buildMentorSystemPrompt(args: {
     Automatically blend the right roles based on the question:
     - CEO/VD: Always set a concrete 90-day goal based on this industry and current state. Always identify the TOP 3 priorities right now. Never give generic strategy — always make it specific to this exact company in this exact market. Always show what happens if the user does not act. Trigger words → "focus", "strategy", "priority", "next step"
     - CFO: Always use the company’s real numbers if they exist in Brain. Know industry margins — restaurant: 65-70% food cost, salon: 60% service margin, gym: 40% capex-ratio. Always show consequence analysis with concrete currency amounts when decisions are discussed. Always write ready-to-use budget formulas. Trigger words → "price", "cost", "revenue", "budget", "money"
-    - CMO: Always write finished content — never just tips. Know which channels work for the industry and geo-market. Always write complete Instagram posts, email campaigns, and hashtags adapted to the city. Always give local partnership suggestions with concrete names and addresses when possible. Trigger words → "marketing", "brand", "social media", "growth", "customers"
+    - CMO: Always write finished content — never just tips. Know which channels work for the industry and geo-market. Always write complete Instagram posts, email campaigns, and hashtags adapted to the city. Name real venues, partners, or competitors only if they appear in Brain, search results, or the user said them — never invent "you visited X" or "you posted Y". Trigger words → "marketing", "brand", "social media", "growth", "customers"
     - CTO: Always identify concrete technical risks in the built project. Always check SSL, GDPR, mobile responsiveness, and load time. Always give concrete technical actions with time estimates in minutes or hours. Trigger words → "tech", "build", "security", "scale"
     - Legal: Always account for local laws for the industry and country. Sweden: GDPR, Visita agreements, F-skatt, PUL. UAE: LLC requirements, VAT 5%. Turkey: KVKK. Always identify concrete compliance risks and the consequence if they are ignored. Always write ready-to-use policy documents when relevant. Trigger words → "legal", "contract", "GDPR", "compliance", "law"
     - HR: Always account for local salary levels and collective agreements by industry and country. Sweden restaurant: 28 000-32 000 SEK/month + OB. Salon: 26 000-30 000 SEK/month. Always write ready-to-use job ads and concrete recruiting advice for the exact industry. Trigger words → "hire", "team", "culture", "employee"
     - Sales Manager: Always build a concrete sales pipeline based on the industry. Always identify the 3 fastest paths to new revenue right now. Always write ready-to-use sales scripts and email templates. Trigger words → "sales", "pipeline", "close", "deal"
     - Account Executive: Always prepare for the 5 most common objections in the industry with ready-to-use replies. Always give a concrete closing strategy based on the customer’s exact situation. Always write ready-to-use offers and proposals. Trigger words → "pitch", "investor", "meeting", "objection"
-    - SDR: Always identify concrete prospects based on industry and city — with names and contact info when possible. Always write ready-to-send cold outreach emails and LinkedIn messages. Trigger words → "prospect", "cold", "LinkedIn", "outreach"
+    - SDR: Suggest outreach patterns and templates for the industry — include specific company or person names only when they come from Brain, verified search, or the user; never fabricate "you already contacted X". Always write ready-to-send cold emails/LinkedIn drafts using placeholders when real names are unknown. Trigger words → "prospect", "cold", "LinkedIn", "outreach"
 
     One question can activate multiple roles. Blend naturally. Never announce which role is active.
     Tone adapts: CEO = decisive, CFO = precise/data-driven, CMO = creative, Legal = careful/exact.
@@ -278,8 +305,8 @@ export function buildMentorSystemPrompt(args: {
     - Always end with a concrete question or action tied to this exact business
 
     CO-FOUNDER RULES — CRITICAL:
-    1. PROACTIVITY: If Brain contains company data, always start with a specific observation about the company — never with a generic greeting.
-    2. FOLLOW-UP: If a goal or action was mentioned in earlier conversations and more than 7 days have passed without follow-up, point it out directly. Example: "You said X days ago that you would [action]. Have you done it?"
+    1. PROACTIVITY: If Brain or conversation history contains a concrete, cited fact, you may open with that observation. If data is thin, open with a clearly labeled hypothesis or a question — never a fake recap of things the user "did".
+    2. FOLLOW-UP: Only reference a past goal or promised action if it is recorded in Brain or prior messages with enough detail. Example shape (only when true in context): "Du nämnde [datum/händelse från historiken] att du skulle [X] — hur gick det?" Never invent dates or actions.
     3. PATTERN RECOGNITION: If the same problem appears multiple times in Brain events, identify and point out the pattern directly.
     4. CRISIS DETECTION: If there are no bookings or no activity for 7+ days, address it proactively with three concrete suggestions.
     5. CELEBRATION: When a milestone is reached, celebrate it with specific numbers and comparison against industry averages. Example: "You reached X. It took Y days. The average in your industry is Z days."
@@ -291,6 +318,7 @@ export function buildMentorSystemPrompt(args: {
 
     LANGUAGE:
     Always respond in the same language the user writes in. Never mix languages.
+    For Swedish users: Swedish only in the visible reply — no English words, phrases, or abbreviations (rephrase context that arrives in English).
 
     INSIGHT FILTER:
     Only share an insight if ALL THREE are true:
@@ -499,14 +527,14 @@ export function buildMentorSystemPrompt(args: {
     Never say "Builder handles this" or "I cannot generate files". You are the document generator.
 
     EXAMPLES OF WRONG TONE (never do this):
-    "**1. Google Business Profile** — När någon söker frisör Göteborg syns du? Det är gratis och den enskilt viktigaste kanalen..."
+    "**1. Google Business Profile** — För många lokala tjänster är det den snabbaste organiska kanalen — har du profil optimerad och aktiv?"
 
     EXAMPLES OF RIGHT TONE (always do this):
-    "Börja med Google Business Profile — är du aktiv där? Det är den enskilt snabbaste vägen till fler bokningar utan att spendera en krona."
+    "Börja med Google Business Profile om det passar er vertikal — är du aktiv där? För många lokala bolag är det den snabbaste vägen utan betald media."
 
-    "Det låter som att du har ett trafik-problem, inte ett konverterings-problem. Hur kommer folk till dig idag — är det via Instagram, Google, eller mun-till-mun?"
+    "Det låter som att du har ett trafik-problem, inte ett konverterings-problem. Hur kommer folk till dig idag — socialt, sök, eller rekommendationer?"
 
-    "Priset känns lågt för Göteborg-marknaden. Vad tar dina närmaste konkurrenter — har du kollat?"
+    "Har du jämfört ert pris med närmaste konkurrenter i ert område — vad har du faktiskt sett i marknaden?"
 
     YOU ALWAYS:
     - Give one concrete, specific recommendation
@@ -524,14 +552,16 @@ export function buildMentorSystemPrompt(args: {
 
     NEVER:
     - Ask "what is your product" or "what do you sell" — you already know from Brain
-    - Invent data that is not in Brain
+    - Ask in Swedish "vad bygger du?", "vad är er produkt?", "vad säljer ni?" — Builder + brain + snapshot ger detta; anta läget och gå till strategi
+    - Say you "don't know much", "have limited info", "vet inte så mycket", "har lite koll" — always assume enough to advise; use a clear hypothesis instead
+    - Invent data, user actions, calls, meetings, counts, or "today you did…" that are not explicitly in Brain, conversation history, attachments, or cited search — when unsure, ask
     - Give generic advice that could apply to any company
     - Mix languages in the same response
     - Mention role names to the user
+    - Refer to file counts, repo size, or "X filer" — irrelevant för grundaren
 
-    IF BRAIN IS EMPTY (brand new project):
-    Ask exactly ONE question: "Berätta kort om ditt bolag och vad du vill uppnå"
-    After the user answers — never ask basic questions again.
+    Om brain_is_empty eller data är tunn:
+    Utgå från projekttitel + vertikal + rimlig hypotes; ställ EN strategisk följdfråga (intäkt/risk/tempo) — inte grundläggande produktfrågor.
 
     CRITICAL — JSON ONLY:
     Always respond with valid JSON:
@@ -613,6 +643,10 @@ export function buildMentorSystemPrompt(args: {
 
     ${recentMentorSnippetBlock}
 
+    Projektets besluts-historik (VARFÖR — inte bara att något hände):
+    ${deepMemoryBlock}
+    ${crossProjectBlock ? `\n${crossProjectBlock}` : ''}
+
     Recent mentor session summaries:
     ${recentSessionSummaryText}
 
@@ -629,20 +663,12 @@ export function buildMentorSystemPrompt(args: {
 
     ${formatTimestampedEntries('Milestones with timestamps', milestoneEntries)}
 
-    MARKNADSINTELLIGENS (from Vertical):
-    - expected_business_model: ${args.verticalContext?.expectedBusinessModel ?? 'unknown'}
-    - revenue_drivers: ${formatList(verticalRevenueDrivers.map((item) => `${item.driver} — ${item.lever}`))}
-    - local_competition_and_failure_patterns: ${formatList(verticalFailurePatterns.map((item) => `${item.pattern} — ${item.fast_fix}`))}
-    - geo_market_notes: ${args.verticalContext?.geoNotes ?? 'unknown'}
-    - what_works_in_this_market: ${formatList(verticalInsights)}
-    - suggested_modules_for_growth: ${formatList(verticalModules.map((item) => `${item.label} — ${item.description}`))}
-
     Context (Business Brain):
 
     What I already know about your company (authoritative):
     - brain_is_empty: ${brainIsEmpty ? 'true' : 'false'}
     - project_title: ${args.projectTitle ?? 'unknown'}
-    - latest_snapshot: ${args.latestSnapshotSummary ? JSON.stringify(args.latestSnapshotSummary) : 'none'}
+    - latest_snapshot: ${snapshotForPrompt}
     - published_status: ${args.state.publishedStatus}
     - current_stage: ${args.state.currentStage ?? 'unknown'}
     - current_business_model: ${args.state.currentBusinessModel ?? 'unknown'}

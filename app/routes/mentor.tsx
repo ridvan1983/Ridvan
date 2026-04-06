@@ -32,6 +32,11 @@ import {
   type MentorAskAttachmentPayload,
   type MentorHealthAnalysisMetric,
 } from '~/lib/mentor/api.client';
+import { stripMentorStructuredTailForUi } from '~/lib/mentor/strip-structured-tail';
+
+function appendMentorStreamDelta(prev: string, delta: string) {
+  return stripMentorStructuredTailForUi(prev + delta);
+}
 
 function hasProjectAnalyzedEvent(value: unknown) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -145,6 +150,7 @@ export default function MentorRoute() {
   const [implementedMessageId, setImplementedMessageId] = useState<string | null>(null);
   const [streamingMentorMessageId, setStreamingMentorMessageId] = useState<string | null>(null);
   const [awaitingFirstStreamToken, setAwaitingFirstStreamToken] = useState(false);
+  const [searchStatusLine, setSearchStatusLine] = useState<string | null>(null);
   const [streamInterrupted, setStreamInterrupted] = useState<
     null | { mode: 'chat'; mentorMessageId: string } | { mode: 'auto_intro' }
   >(null);
@@ -444,6 +450,7 @@ Håll det under 150 ord. Direkt och konkret. Aldrig generiskt.`;
           },
           {
             onStreamConnected: () => {
+              setSearchStatusLine(null);
               introStreamOpened = true;
               setIsAutoIntroLoading(false);
               setMessages((prev) => {
@@ -453,9 +460,15 @@ Håll det under 150 ord. Direkt och konkret. Aldrig generiskt.`;
               setStreamingMentorMessageId(introSid);
               setAwaitingFirstStreamToken(true);
             },
+            onSearch: ({ query, reason }) => {
+              const r = reason.trim().slice(0, 120);
+              setSearchStatusLine(`Mentor söker: ${query}${r ? ` — ${r}` : ''}…`);
+            },
             onFirstDelta: () => setAwaitingFirstStreamToken(false),
             onDelta: (d) => {
-              setMessages((prev) => prev.map((m) => (m.id === introSid ? { ...m, content: m.content + d } : m)));
+              setMessages((prev) =>
+                prev.map((m) => (m.id === introSid ? { ...m, content: appendMentorStreamDelta(m.content, d) } : m)),
+              );
             },
           },
         );
@@ -486,7 +499,7 @@ Håll det under 150 ord. Direkt och konkret. Aldrig generiskt.`;
                 if (m.id !== introSid) {
                   return m;
                 }
-                const t = m.content.trim();
+                const t = stripMentorStructuredTailForUi(m.content).trim();
                 return { ...m, content: t ? `${t}${interruptSuffix}` : interruptSuffix.trim() };
               }),
             );
@@ -496,7 +509,7 @@ Håll det under 150 ord. Direkt och konkret. Aldrig generiskt.`;
           return;
         }
 
-        const mentorText = typeof res.reply === 'string' ? res.reply.trim() : '';
+        const mentorText = stripMentorStructuredTailForUi(typeof res.reply === 'string' ? res.reply : '').trim();
         if (!mentorText) {
           setMessages((prev) => prev.filter((m) => m.id !== introSid));
           autoIntroAttemptedRef.current.delete(selectedProjectId);
@@ -520,6 +533,7 @@ Håll det under 150 ord. Direkt och konkret. Aldrig generiskt.`;
           setMessages((prev) => prev.filter((m) => m.id !== introSid));
         }
       } finally {
+        setSearchStatusLine(null);
         setIsAutoIntroLoading(false);
         setAwaitingFirstStreamToken(false);
         setStreamingMentorMessageId(null);
@@ -703,15 +717,20 @@ Håll det under 150 ord. Direkt och konkret. Aldrig generiskt.`;
         },
         {
           onStreamConnected: () => {
+            setSearchStatusLine(null);
             chatStreamOpened = true;
             setMessages((prev) => [...prev, { id: sid, role: 'mentor', content: '', createdAt: streamCreatedAt }]);
             setStreamingMentorMessageId(sid);
             setAwaitingFirstStreamToken(true);
             setIsThinking(false);
           },
+          onSearch: ({ query, reason }) => {
+            const r = reason.trim().slice(0, 120);
+            setSearchStatusLine(`Mentor söker: ${query}${r ? ` — ${r}` : ''}…`);
+          },
           onFirstDelta: () => setAwaitingFirstStreamToken(false),
           onDelta: (d) => {
-            setMessages((prev) => prev.map((m) => (m.id === sid ? { ...m, content: m.content + d } : m)));
+            setMessages((prev) => prev.map((m) => (m.id === sid ? { ...m, content: appendMentorStreamDelta(m.content, d) } : m)));
           },
         },
       );
@@ -745,7 +764,7 @@ Håll det under 150 ord. Direkt och konkret. Aldrig generiskt.`;
             if (m.id !== sid) {
               return m;
             }
-            const t = m.content.trim();
+            const t = stripMentorStructuredTailForUi(m.content).trim();
             return { ...m, content: t ? `${t}${interruptSuffix}` : interruptSuffix.trim() };
           }),
         );
@@ -757,7 +776,7 @@ Håll det under 150 ord. Direkt och konkret. Aldrig generiskt.`;
       lastChatStreamPayloadRef.current = null;
       setEventsWritten(typeof res.eventsWritten === 'number' ? res.eventsWritten : null);
 
-      const mentorText = typeof res.reply === 'string' ? res.reply : '';
+      const mentorText = stripMentorStructuredTailForUi(typeof res.reply === 'string' ? res.reply : '');
       const events = Array.isArray(res.events) ? res.events : [];
 
       const docMessages: MentorChatMessage[] = [];
@@ -907,6 +926,7 @@ Håll det under 150 ord. Direkt och konkret. Aldrig generiskt.`;
         setError(msg);
       }
     } finally {
+      setSearchStatusLine(null);
       setIsSending(false);
       setIsThinking(false);
       setThinkingText('Analyserar...');
@@ -958,14 +978,21 @@ Håll det under 150 ord. Direkt och konkret. Aldrig generiskt.`;
         },
         {
           onStreamConnected: () => {
+            setSearchStatusLine(null);
             retryOpened = true;
             setStreamingMentorMessageId(replayId);
             setAwaitingFirstStreamToken(true);
             setIsThinking(false);
           },
+          onSearch: ({ query, reason }) => {
+            const r = reason.trim().slice(0, 120);
+            setSearchStatusLine(`Mentor söker: ${query}${r ? ` — ${r}` : ''}…`);
+          },
           onFirstDelta: () => setAwaitingFirstStreamToken(false),
           onDelta: (d) => {
-            setMessages((prev) => prev.map((m) => (m.id === replayId ? { ...m, content: m.content + d } : m)));
+            setMessages((prev) =>
+              prev.map((m) => (m.id === replayId ? { ...m, content: appendMentorStreamDelta(m.content, d) } : m)),
+            );
           },
         },
       );
@@ -999,7 +1026,7 @@ Håll det under 150 ord. Direkt och konkret. Aldrig generiskt.`;
             if (m.id !== replayId) {
               return m;
             }
-            const t = m.content.trim();
+            const t = stripMentorStructuredTailForUi(m.content).trim();
             return { ...m, content: t ? `${t}${interruptSuffix}` : interruptSuffix.trim() };
           }),
         );
@@ -1011,7 +1038,7 @@ Håll det under 150 ord. Direkt och konkret. Aldrig generiskt.`;
       lastChatStreamPayloadRef.current = null;
       setEventsWritten(typeof res.eventsWritten === 'number' ? res.eventsWritten : null);
 
-      const mentorText = typeof res.reply === 'string' ? res.reply : '';
+      const mentorText = stripMentorStructuredTailForUi(typeof res.reply === 'string' ? res.reply : '');
       const events = Array.isArray(res.events) ? res.events : [];
 
       const docMessages: MentorChatMessage[] = [];
@@ -1154,6 +1181,7 @@ Håll det under 150 ord. Direkt och konkret. Aldrig generiskt.`;
         setError(e instanceof Error ? e.message : 'Mentor request failed');
       }
     } finally {
+      setSearchStatusLine(null);
       setIsSending(false);
       setIsThinking(false);
       setThinkingText('Analyserar...');
@@ -1491,6 +1519,7 @@ Håll det under 150 ord. Direkt och konkret. Aldrig generiskt.`;
               messages={messages}
               isTyping={(isThinking || isAutoIntroLoading) && !streamingMentorMessageId}
               typingText={isAutoIntroLoading ? 'Mentor analyserar ditt projekt...' : thinkingText}
+              searchStatusLine={searchStatusLine}
               streamingMessageId={streamingMentorMessageId}
               isStreamingAssistant={Boolean(streamingMentorMessageId)}
               awaitingFirstStreamToken={awaitingFirstStreamToken}

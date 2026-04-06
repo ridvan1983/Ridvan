@@ -257,17 +257,60 @@ function buildVerticalSignals(industry: string) {
   return { revenueDrivers, failurePatterns };
 }
 
-export async function getVerticalContext(args: { projectId: string; userId: string; language?: string | null; env?: Env }) {
-  const brain = await readBrainContext({ projectId: args.projectId, userId: args.userId });
+export async function getVerticalContext(args: {
+  projectId: string;
+  userId: string;
+  language?: string | null;
+  env?: Env;
+  /** When set, skips a duplicate readBrainContext inside this function */
+  brain?: Awaited<ReturnType<typeof readBrainContext>>;
+  /** No taxonomy LLM / no localized vertical LLM — static + heuristic industry only (Mentor latency) */
+  mentorFastPath?: boolean;
+}) {
+  const brain = args.brain ?? (await readBrainContext({ projectId: args.projectId, userId: args.userId }));
 
   const contextSources = await readProjectContextSources(args);
-  const promptExtraction = contextSources.firstUserPrompt ? await extractIndustryAndGeo(contextSources.firstUserPrompt) : { industry: null, geo: null };
-  const titleExtraction = contextSources.projectTitle ? await extractIndustryAndGeo(contextSources.projectTitle) : { industry: null, geo: null };
-  const promptIndustry = promptExtraction.industry ? normalizeIndustry(promptExtraction.industry) : null;
-  const titleIndustry = titleExtraction.industry ? normalizeIndustry(titleExtraction.industry) : null;
+
+  let promptIndustry: ReturnType<typeof normalizeIndustry> | null = null;
+  let titleIndustry: ReturnType<typeof normalizeIndustry> | null = null;
+  let promptGeoString: string | null = null;
+  let titleGeoString: string | null = null;
+
+  if (args.mentorFastPath) {
+    if (contextSources.firstUserPrompt) {
+      promptIndustry = normalizeIndustry(contextSources.firstUserPrompt);
+    }
+    if (contextSources.projectTitle) {
+      titleIndustry = normalizeIndustry(contextSources.projectTitle);
+    }
+  } else {
+    const [promptExtraction, titleExtraction] = await Promise.all([
+      contextSources.firstUserPrompt
+        ? extractIndustryAndGeo(contextSources.firstUserPrompt)
+        : Promise.resolve({ industry: null, geo: null }),
+      contextSources.projectTitle
+        ? extractIndustryAndGeo(contextSources.projectTitle)
+        : Promise.resolve({ industry: null, geo: null }),
+    ]);
+    promptIndustry = promptExtraction.industry ? normalizeIndustry(promptExtraction.industry) : null;
+    titleIndustry = titleExtraction.industry ? normalizeIndustry(titleExtraction.industry) : null;
+    const [pg, tg] = await Promise.all([
+      promptExtraction.geo
+        ? Promise.resolve(promptExtraction.geo)
+        : contextSources.firstUserPrompt
+          ? extractGeo(contextSources.firstUserPrompt)
+          : Promise.resolve(null),
+      titleExtraction.geo
+        ? Promise.resolve(titleExtraction.geo)
+        : contextSources.projectTitle
+          ? extractGeo(contextSources.projectTitle)
+          : Promise.resolve(null),
+    ]);
+    promptGeoString = pg;
+    titleGeoString = tg;
+  }
+
   const brainIndustry = brain?.industryProfile ?? null;
-  const promptGeoString = promptExtraction.geo ?? (contextSources.firstUserPrompt ? await extractGeo(contextSources.firstUserPrompt) : null);
-  const titleGeoString = titleExtraction.geo ?? (contextSources.projectTitle ? await extractGeo(contextSources.projectTitle) : null);
   const promptGeo = buildFallbackGeoProfile(promptGeoString);
   const titleGeo = buildFallbackGeoProfile(titleGeoString);
   const industry =
@@ -297,13 +340,15 @@ export async function getVerticalContext(args: { projectId: string; userId: stri
 
   const expectedBusinessModel = buildExpectedBusinessModel(industry);
   const { revenueDrivers, failurePatterns } = buildVerticalSignals(industry);
-  const localizedSignals = await generateLocalizedVerticalSignals({
-    industry,
-    geo: [promptGeo.city, titleGeo.city, geoProfile.city, geoProfile.country].filter(Boolean).join(', ') || null,
-    sourceText: contextSources.firstUserPrompt ?? contextSources.projectTitle,
-    languageHint: args.language ?? null,
-    env: args.env,
-  }).catch(() => null);
+  const localizedSignals = args.mentorFastPath
+    ? null
+    : await generateLocalizedVerticalSignals({
+        industry,
+        geo: [promptGeo.city, titleGeo.city, geoProfile.city, geoProfile.country].filter(Boolean).join(', ') || null,
+        sourceText: contextSources.firstUserPrompt ?? contextSources.projectTitle,
+        languageHint: args.language ?? null,
+        env: args.env,
+      }).catch(() => null);
 
   if (industry === 'hair_salon') {
     revenueDrivers.push(

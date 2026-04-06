@@ -67,7 +67,9 @@ function noCreditsResponse() {
 function documentCreditCost(documentType: string) {
   const value = documentType.trim().toLowerCase();
 
-  if (value === 'business_plan' || value === 'affärsplan' || value === 'affarsplan') return 10;
+  if (value === 'business_plan' || value === 'affärsplan' || value === 'affarsplan' || value === 'annual_roadmap') {
+    return 10;
+  }
   if (value === 'budget' || value === 'quarterly_budget') return 8;
   if (value === 'cashflow' || value === 'kassaflöde' || value === 'kassaflode') return 8;
   if (value === 'investor_pitch' || value === 'pitch' || value === 'pitch_deck') return 15;
@@ -108,6 +110,10 @@ function inferDocumentType(documentType: string, title: string): RenderedDocumen
     haystack.includes('affärsplan') ||
     haystack.includes('affarsplan') ||
     haystack.includes('business plan') ||
+    haystack.includes('årsplan') ||
+    haystack.includes('arsplan') ||
+    haystack.includes('roadmap') ||
+    haystack.includes('annual_roadmap') ||
     haystack.includes('marknadsplan') ||
     haystack.includes('marketing plan') ||
     haystack.includes('hr-policy') ||

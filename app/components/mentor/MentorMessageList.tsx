@@ -3,9 +3,13 @@ import { parseProactiveMentorStorage, splitMentorInsightTrailer } from '~/lib/me
 import { MentorMessageBubble } from './MentorMessageBubble';
 import { DocumentCard, type MentorDocumentCard } from './DocumentCard';
 import { MentorInsightCard } from './MentorInsightCard';
+import { stripMentorStructuredTailForUi } from '~/lib/mentor/strip-structured-tail';
 import { MentorRichText } from './MentorRichText';
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 72;
+
+/** Same prefix as api.mentor `buildImplementationPrompt` — annars ingen "Implementera"-knapp. */
+const SERVER_IMPLEMENT_PROMPT_PREFIX = 'Implement this mentor recommendation in the existing codebase';
 
 function extractImplementationAction(content: string) {
   const match = content.match(/\[data-implement="true"\s+data-prompt="([\s\S]*?)"\]$/m);
@@ -13,8 +17,13 @@ function extractImplementationAction(content: string) {
     return { visibleContent: content, prompt: null };
   }
 
-  const prompt = match[1]?.replace(/&quot;/g, '"').trim() ?? null;
+  const decoded = match[1]?.replace(/&quot;/g, '"').trim() ?? '';
   const visibleContent = content.replace(match[0], '').trim();
+
+  const looksLikeServerImplementPrompt =
+    decoded.length >= 48 && decoded.startsWith(SERVER_IMPLEMENT_PROMPT_PREFIX);
+  const prompt = looksLikeServerImplementPrompt ? decoded : null;
+
   return { visibleContent, prompt };
 }
 
@@ -56,6 +65,8 @@ export function MentorMessageList(props: {
   messages: MentorChatMessage[];
   isTyping: boolean;
   typingText?: string;
+  /** Shown under typing indicator when Mentor runs web search */
+  searchStatusLine?: string | null;
   onImplement?: (prompt: string, messageId: string) => void;
   implementingMessageId?: string | null;
   implementedMessageId?: string | null;
@@ -126,6 +137,7 @@ export function MentorMessageList(props: {
           const { visible: bubbleMarkdown, insight: trailerInsight } = isMentor
             ? splitMentorInsightTrailer(baseForSplit)
             : { visible: implementation.visibleContent, insight: null };
+          const visibleBubble = stripMentorStructuredTailForUi(bubbleMarkdown);
           const insightCard = isMentor ? proactive?.insight ?? trailerInsight : null;
           const showProactiveLabel = isMentor && Boolean(proactive?.triggerType);
           const canImplement = m.role === 'mentor' && Boolean(implementation.prompt) && !m.documentCard && !m.priorityCard;
@@ -191,16 +203,16 @@ export function MentorMessageList(props: {
 
                 {typingInsideBubble ? <MentorTypingDots /> : null}
 
-                {!typingInsideBubble && bubbleMarkdown ? (
+                {!typingInsideBubble && visibleBubble.trim() ? (
                   m.role === 'mentor' ? (
                     <div className="leading-relaxed">
-                      <MentorRichText content={bubbleMarkdown} />
+                      <MentorRichText content={visibleBubble} />
                       {showStreamCursor ? (
                         <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-violet-500 align-middle" aria-hidden />
                       ) : null}
                     </div>
                   ) : (
-                    <div className="whitespace-pre-wrap leading-relaxed">{bubbleMarkdown}</div>
+                    <div className="whitespace-pre-wrap leading-relaxed">{visibleBubble}</div>
                   )
                 ) : null}
 
@@ -226,13 +238,24 @@ export function MentorMessageList(props: {
         })}
 
         {props.isTyping ? (
-          <div className="flex flex-col items-start">
+          <div className="flex flex-col items-start gap-1">
             <MentorMessageBubble role="mentor" showMentorBrand>
               <MentorTypingDots />
               {props.typingText ? (
                 <div className="mt-2 text-sm text-bolt-elements-textSecondary">{props.typingText}</div>
               ) : null}
             </MentorMessageBubble>
+            {props.searchStatusLine ? (
+              <div className="max-w-[85%] pl-1 text-[11px] italic leading-snug text-bolt-elements-textSecondary">
+                {props.searchStatusLine}
+              </div>
+            ) : null}
+          </div>
+        ) : props.searchStatusLine ? (
+          <div className="flex flex-col items-start">
+            <div className="max-w-[85%] pl-1 text-[11px] italic leading-snug text-bolt-elements-textSecondary">
+              {props.searchStatusLine}
+            </div>
           </div>
         ) : null}
 

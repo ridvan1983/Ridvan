@@ -56,6 +56,8 @@ export type MentorStreamHandlers = {
   onStreamConnected?: () => void;
   onDelta: (text: string) => void;
   onFirstDelta?: () => void;
+  /** Mentor invoked web search (Serper) — show discreet status in UI. */
+  onSearch?: (args: { query: string; reason: string }) => void;
 };
 
 export type MentorStreamSuccess = {
@@ -183,6 +185,8 @@ export async function mentorAskStream(
         let parsed: {
           t?: string;
           d?: string;
+          query?: string;
+          reason?: string;
           reply?: string;
           insight?: unknown;
           events?: unknown;
@@ -194,6 +198,12 @@ export async function mentorAskStream(
           parsed = JSON.parse(raw) as typeof parsed;
         } catch {
           continue;
+        }
+        if (parsed.t === 'search' && typeof parsed.query === 'string') {
+          handlers.onSearch?.({
+            query: parsed.query,
+            reason: typeof parsed.reason === 'string' ? parsed.reason : '',
+          });
         }
         if (parsed.t === 'delta' && typeof parsed.d === 'string') {
           notifyDelta(parsed.d);
@@ -710,4 +720,57 @@ export async function readBrainDebug(accessToken: string, projectId: string) {
   }
 
   return (await res.json()) as unknown;
+}
+
+export type MentorDeepMemoryRow = {
+  v: 1;
+  decisions: Array<{ id: string; decision: string; reason: string; date: string; outcome?: string }>;
+  pivots: Array<{ id: string; from: string; to: string; reason: string; date: string }>;
+  goals: Array<{ id: string; goal: string; set_date: string; status: string; progress?: string }>;
+  learnings: Array<{ id: string; learning: string; source: string; date: string }>;
+};
+
+export async function fetchMentorMemory(accessToken: string, projectId: string) {
+  const res = await fetch(`/api/mentor/memory?projectId=${encodeURIComponent(projectId)}`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const json = (await res.json().catch(() => null)) as unknown;
+  if (!res.ok) {
+    const message =
+      json && typeof json === 'object' && 'error' in json && typeof (json as { error?: unknown }).error === 'string'
+        ? String((json as { error: string }).error)
+        : `[RIDVAN-E1930] Mentor memory load failed (${res.status})`;
+    throw new Error(message);
+  }
+  return json as { ok: true; memory: MentorDeepMemoryRow };
+}
+
+export async function mutateMentorMemory(
+  accessToken: string,
+  body: {
+    projectId: string;
+    op: 'remove' | 'patch';
+    id: string;
+    category?: 'decisions' | 'pivots' | 'goals' | 'learnings';
+    updates?: Record<string, string>;
+  },
+) {
+  const res = await fetch('/api/mentor/memory', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  const json = (await res.json().catch(() => null)) as unknown;
+  if (!res.ok) {
+    const message =
+      json && typeof json === 'object' && 'error' in json && typeof (json as { error?: unknown }).error === 'string'
+        ? String((json as { error: string }).error)
+        : `[RIDVAN-E1931] Mentor memory update failed (${res.status})`;
+    throw new Error(message);
+  }
+  return json as { ok: true; memory: MentorDeepMemoryRow };
 }

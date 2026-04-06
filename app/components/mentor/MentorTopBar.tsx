@@ -1,3 +1,4 @@
+import { Link } from '@remix-run/react';
 import type { Project } from '~/lib/projects/types';
 
 export function MentorTopBar(props: {
@@ -21,8 +22,14 @@ export function MentorTopBar(props: {
   return (
     <div className="border-b border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 px-4 py-3">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <div className="text-sm font-semibold">Mentor</div>
+          <Link
+            to="/mentor/memory"
+            className="text-xs font-medium text-violet-700 underline-offset-2 hover:underline"
+          >
+            Minne
+          </Link>
           <select
             className="rounded-lg border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 px-3 py-2 text-sm text-bolt-elements-textPrimary"
             value={props.selectedProjectId}

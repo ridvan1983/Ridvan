@@ -1,3 +1,4 @@
+import { appendDeepMemoryInWorkspace } from '~/lib/mentor/memory.server';
 import { supabaseAdmin } from '~/lib/supabase/server';
 
 type AssertionSource = 'user_stated' | 'system_inferred' | 'externally_researched';
@@ -524,6 +525,71 @@ async function ingestWorldIndustrySet(event: BrainEventRow) {
   });
 }
 
+async function ingestMentorDeepMemoryEvent(event: BrainEventRow) {
+  const type = normalizeEventType(event.type);
+  const p = asObject(event.payload);
+  const t = event.occurred_at;
+
+  if (type === 'mentor.memory.decision') {
+    const decision = coerceText(p.decision);
+    const reason = coerceText(p.reason);
+    if (!decision || !reason) {
+      return;
+    }
+    await appendDeepMemoryInWorkspace(event.workspace_id, t, {
+      kind: 'decision',
+      decision,
+      reason,
+      outcome: coerceText(p.outcome) ?? undefined,
+    });
+    return;
+  }
+
+  if (type === 'mentor.memory.pivot') {
+    const from = coerceText(p.from);
+    const to = coerceText(p.to);
+    const reason = coerceText(p.reason);
+    if (!from || !to || !reason) {
+      return;
+    }
+    await appendDeepMemoryInWorkspace(event.workspace_id, t, {
+      kind: 'pivot',
+      from,
+      to,
+      reason,
+    });
+    return;
+  }
+
+  if (type === 'mentor.memory.goal') {
+    const goal = coerceText(p.goal);
+    const status = coerceText(p.status);
+    if (!goal || !status) {
+      return;
+    }
+    await appendDeepMemoryInWorkspace(event.workspace_id, t, {
+      kind: 'goal',
+      goal,
+      status,
+      progress: coerceText(p.progress) ?? undefined,
+    });
+    return;
+  }
+
+  if (type === 'mentor.memory.learning') {
+    const learning = coerceText(p.learning);
+    const source = coerceText(p.source);
+    if (!learning || !source) {
+      return;
+    }
+    await appendDeepMemoryInWorkspace(event.workspace_id, t, {
+      kind: 'learning',
+      learning,
+      source,
+    });
+  }
+}
+
 async function ingestMentorMilestoneLogged(event: BrainEventRow) {
   const payload = asObject(event.payload);
   const assertionSource = normalizeAssertionSource(payload);
@@ -605,6 +671,15 @@ export async function ingestBrainEvent(event: BrainEventRow) {
         return;
       }
       return ingestMentorMilestoneLogged(event);
+  }
+
+  if (
+    type === 'mentor.memory.decision' ||
+    type === 'mentor.memory.pivot' ||
+    type === 'mentor.memory.goal' ||
+    type === 'mentor.memory.learning'
+  ) {
+    return ingestMentorDeepMemoryEvent(event);
   }
 
   return;

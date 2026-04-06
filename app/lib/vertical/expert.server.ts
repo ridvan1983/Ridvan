@@ -210,9 +210,3 @@ export function getVerticalExpertContext(vertical: ExpertVerticalKey): string {
     ...pack.successFactors.map((m) => `- ${m}`),
   ].join('\n');
 }
-
-export function getVerticalExpertSummaryLine(vertical: ExpertVerticalKey): string {
-  const pack = PACKS[vertical] ?? PACKS.general;
-  const top = pack.competitors.map((c) => c.name).join(', ');
-  return `${pack.label}: watch ${top}; ${pack.scalingChallenges[0] ?? 'focus on ICP and unit economics'}`;
-}

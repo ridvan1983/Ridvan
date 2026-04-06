@@ -9,6 +9,7 @@ export function MentorChat(props: {
   messages: MentorChatMessage[];
   isTyping: boolean;
   typingText?: string;
+  searchStatusLine?: string | null;
   streamingMessageId?: string | null;
   isStreamingAssistant?: boolean;
   awaitingFirstStreamToken?: boolean;
@@ -21,6 +22,7 @@ export function MentorChat(props: {
       messages={props.messages}
       isTyping={props.isTyping}
       typingText={props.typingText}
+      searchStatusLine={props.searchStatusLine}
       streamingMessageId={props.streamingMessageId}
       isStreamingAssistant={props.isStreamingAssistant}
       awaitingFirstStreamToken={props.awaitingFirstStreamToken}
