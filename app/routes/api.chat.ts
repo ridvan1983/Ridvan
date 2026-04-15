@@ -111,6 +111,12 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
 
   const { messages } = await request.json<{ messages: Messages }>();
 
+  const MAX_HISTORY = 10;
+  let truncatedMessages =
+    messages.length > MAX_HISTORY
+      ? [...messages.slice(0, 1), ...messages.slice(-(MAX_HISTORY - 1))]
+      : messages;
+
   const stream = new SwitchableStream();
   let streamChunkCount = 0;
   let streamByteCount = 0;
@@ -257,10 +263,15 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
         messages.push({ role: 'assistant', content });
         messages.push({ role: 'user', content: CONTINUE_PROMPT });
 
+        truncatedMessages =
+          messages.length > MAX_HISTORY
+            ? [...messages.slice(0, 1), ...messages.slice(-(MAX_HISTORY - 1))]
+            : messages;
+
         if (DEBUG) {
           console.log('[RIDVAN DEBUG][api.chat] before:llm');
         }
-        const result = await streamTextWithOverloadRetry(messages, options);
+        const result = await streamTextWithOverloadRetry(truncatedMessages, options);
         if (DEBUG) {
           const responseLike = (result as any)?.response;
           const contentType =
@@ -278,7 +289,7 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
     if (DEBUG) {
       console.log('[RIDVAN DEBUG][api.chat] before:llm');
     }
-    const result = await streamTextWithOverloadRetry(messages, options);
+    const result = await streamTextWithOverloadRetry(truncatedMessages, options);
     if (DEBUG) {
       const responseLike = (result as any)?.response;
       const contentType = typeof responseLike?.headers?.get === 'function' ? responseLike.headers.get('content-type') : null;
