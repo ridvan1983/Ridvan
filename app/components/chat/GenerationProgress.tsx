@@ -9,8 +9,15 @@ interface GenerationProgressProps {
 
 const POLL_INTERVAL_MS = 500;
 const DONE_VISIBLE_MS = 1000;
+const SLOW_AFTER_MS = 30_000;
+const PROMPT_ANALYSIS_MS = 4_000;
 
-function getPhaseMessage(): string {
+type PhaseInfo = {
+  title: string;
+  eta?: string;
+};
+
+function getWorkbenchPhase(): PhaseInfo | null {
   const artifacts = workbenchStore.artifacts.get();
 
   for (const artifactId of [...workbenchStore.artifactIdList].reverse()) {
@@ -27,34 +34,54 @@ function getPhaseMessage(): string {
     const hasInstallAction = shellActions.some((action) => action.content.toLowerCase().includes('install'));
     const hasStartPreviewAction = shellActions.some((action) => {
       const content = action.content.toLowerCase();
-      return content.includes('npm run dev') || content.includes('pnpm dev') || content.includes('npm start') || content.includes('pnpm start');
+      return (
+        content.includes('npm run dev') ||
+        content.includes('pnpm dev') ||
+        content.includes('npm start') ||
+        content.includes('pnpm start')
+      );
     });
 
     if (hasStartPreviewAction) {
-      return 'Starting preview...';
+      return { title: 'Startar preview…', eta: 'Ofta 30 s–2 min' };
     }
 
     if (hasInstallAction) {
-      return 'Installing dependencies...';
+      return { title: 'Installerar paket…', eta: 'Ofta 1–6 min första gången' };
     }
 
     if (fileActions.length > 1) {
-      return 'Writing components...';
+      return { title: 'Genererar kod…', eta: 'Ofta 1–8 min' };
     }
 
     if (fileActions.length > 0) {
-      return 'Setting up project...';
+      return { title: 'Genererar kod…', eta: 'Ofta 1–8 min' };
     }
   }
 
-  return 'Analyzing your prompt...';
+  return null;
+}
+
+function getPhaseForElapsed(elapsedMs: number): PhaseInfo {
+  const fromWorkbench = getWorkbenchPhase();
+  if (fromWorkbench) {
+    return fromWorkbench;
+  }
+
+  if (elapsedMs < PROMPT_ANALYSIS_MS) {
+    return { title: 'Analyserar din prompt…', eta: 'Några sekunder' };
+  }
+
+  return { title: 'Genererar kod…', eta: 'Ofta 1–8 min' };
 }
 
 export default function GenerationProgress({ isStreaming }: GenerationProgressProps) {
   useStore(workbenchStore.artifacts);
-  const [message, setMessage] = useState('Analyzing your prompt...');
+  const [phase, setPhase] = useState<PhaseInfo>({ title: 'Analyserar din prompt…', eta: 'Några sekunder' });
   const [showDone, setShowDone] = useState(false);
+  const [slowNotice, setSlowNotice] = useState(false);
   const doneTimeoutRef = useRef<number | null>(null);
+  const streamStartedAtRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (doneTimeoutRef.current !== null) {
@@ -63,18 +90,30 @@ export default function GenerationProgress({ isStreaming }: GenerationProgressPr
     }
 
     if (isStreaming) {
-      setShowDone(false);
-      setMessage(getPhaseMessage());
+      if (streamStartedAtRef.current === null) {
+        streamStartedAtRef.current = Date.now();
+      }
 
-      const intervalId = window.setInterval(() => {
-        setMessage(getPhaseMessage());
-      }, POLL_INTERVAL_MS);
+      setShowDone(false);
+      setSlowNotice(false);
+
+      const tick = () => {
+        const started = streamStartedAtRef.current ?? Date.now();
+        const elapsed = Date.now() - started;
+        setPhase(getPhaseForElapsed(elapsed));
+        setSlowNotice(elapsed >= SLOW_AFTER_MS);
+      };
+
+      tick();
+      const intervalId = window.setInterval(tick, POLL_INTERVAL_MS);
 
       return () => {
         window.clearInterval(intervalId);
       };
     }
 
+    streamStartedAtRef.current = null;
+    setSlowNotice(false);
     setShowDone(true);
     doneTimeoutRef.current = window.setTimeout(() => {
       setShowDone(false);
@@ -108,9 +147,17 @@ export default function GenerationProgress({ isStreaming }: GenerationProgressPr
   return (
     <>
       <style>{`@keyframes generation-progress-dot { 0%, 80%, 100% { opacity: 0.3; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-1px); } }`}</style>
-      <div className="w-full max-w-chat mx-auto px-4 pb-2 text-xs text-bolt-elements-textTertiary">
-        <span>{showDone ? 'Done!' : message}</span>
-        {isStreaming ? dots : null}
+      <div className="w-full max-w-chat mx-auto px-4 pb-2 text-xs text-bolt-elements-textTertiary space-y-1">
+        <div>
+          <span>{showDone ? 'Klart!' : phase.title}</span>
+          {isStreaming ? dots : null}
+        </div>
+        {!showDone && isStreaming && phase.eta ? (
+          <div className="text-[11px] text-bolt-elements-textTertiary/90">Ungefärlig tid: {phase.eta}</div>
+        ) : null}
+        {!showDone && isStreaming && slowNotice ? (
+          <div className="text-[11px] text-amber-700/90">Detta tar lite längre än vanligt…</div>
+        ) : null}
       </div>
     </>
   );

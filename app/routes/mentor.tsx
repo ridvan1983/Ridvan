@@ -1,5 +1,5 @@
 import { json, type MetaFunction } from '@remix-run/cloudflare';
-import { useNavigate } from '@remix-run/react';
+import { useNavigate, useSearchParams } from '@remix-run/react';
 import { Header } from '~/components/header/Header';
 import { useAuth } from '~/lib/auth/AuthContext';
 import { FEATURE_FLAGS } from '~/config/feature-flags';
@@ -104,6 +104,7 @@ export default function MentorRoute() {
   const { session } = useAuth();
   const accessToken = session?.access_token ?? null;
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const showHealthControls = FEATURE_FLAGS.mentorHealth;
   const showDailyPriorityControls = FEATURE_FLAGS.mentorDailyPriority;
   const enableMilestones = FEATURE_FLAGS.mentorMilestones;
@@ -158,6 +159,8 @@ export default function MentorRoute() {
   const lastChatStreamPayloadRef = useRef<null | { message: string; attachments: MentorAskAttachmentPayload[] }>(null);
 
   const autoIntroAttemptedRef = useRef<Set<string>>(new Set());
+  const mentorDraftConsumedRef = useRef(false);
+  const urlProjectIdFromRoute = searchParams.get('projectId')?.trim() ?? '';
 
   const canSend = Boolean(accessToken && selectedProjectId && (draft.trim().length > 0 || pendingAttachments.length > 0) && !isSending);
 
@@ -180,15 +183,40 @@ export default function MentorRoute() {
     listProjects(accessToken)
       .then((items) => {
         setProjects(items);
-        if (!selectedProjectId && items.length > 0) {
-          setSelectedProjectId(items[0].id);
-        }
+        setSelectedProjectId((prev) => {
+          if (urlProjectIdFromRoute && items.some((p) => p.id === urlProjectIdFromRoute)) {
+            return urlProjectIdFromRoute;
+          }
+          if (!prev && items.length > 0) {
+            return items[0].id;
+          }
+          return prev;
+        });
       })
       .catch(() => {
         setProjects([]);
       });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accessToken]);
+  }, [accessToken, urlProjectIdFromRoute]);
+
+  useEffect(() => {
+    const rawDraft = searchParams.get('mentorDraft');
+    if (!rawDraft?.trim() || mentorDraftConsumedRef.current || !selectedProjectId) {
+      return;
+    }
+    const urlPid = searchParams.get('projectId')?.trim();
+    if (urlPid && urlPid !== selectedProjectId) {
+      return;
+    }
+    try {
+      setDraft(decodeURIComponent(rawDraft.trim()));
+    } catch {
+      setDraft(rawDraft.trim());
+    }
+    mentorDraftConsumedRef.current = true;
+    const next = new URLSearchParams(searchParams);
+    next.delete('mentorDraft');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, selectedProjectId, setSearchParams]);
 
   useEffect(() => {
     try {

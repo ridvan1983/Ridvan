@@ -2,6 +2,7 @@ import { Link, useLocation } from '@remix-run/react';
 
 const LINKS: Array<{ to: string; label: string }> = [
   { to: '/admin', label: 'Översikt' },
+  { to: '/admin/intelligence', label: 'Intelligence' },
   { to: '/admin/billing', label: 'Billing' },
   { to: '/admin/errors', label: 'Errors' },
   { to: '/admin/webhooks', label: 'Webhooks' },

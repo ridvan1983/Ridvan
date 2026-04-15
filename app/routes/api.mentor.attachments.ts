@@ -6,7 +6,8 @@ import { extractTextFromAttachmentBytes } from '~/lib/mentor/file-analysis.serve
 import { supabaseAdmin } from '~/lib/supabase/server';
 
 const BUCKET = 'mentor-attachments';
-const MAX_BYTES = 5 * 1024 * 1024;
+const MAX_BYTES = 25 * 1024 * 1024;
+const MAX_MB = Math.floor(MAX_BYTES / (1024 * 1024));
 
 function decodeBase64ToUint8Array(base64: string) {
   const bin = atob(base64);
@@ -54,7 +55,7 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (bytes.byteLength > MAX_BYTES) {
-    return Response.json({ error: '[RIDVAN-E992] File too large' }, { status: 400 });
+    return Response.json({ error: `[RIDVAN-E992] File too large. Max ${MAX_MB}MB` }, { status: 400 });
   }
 
   const workspace = await ensureBrainWorkspace(projectId, user.id);

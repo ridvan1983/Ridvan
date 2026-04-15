@@ -5,6 +5,7 @@ import { brand } from '~/config/brand';
 import { useAuth } from '~/lib/auth/AuthContext';
 import { listProjects } from '~/lib/projects/api.client';
 import type { Project } from '~/lib/projects/types';
+import { ProjectHealthDot } from '~/components/project-intelligence/ProjectIntelligenceDashboard';
 
 function formatUpdatedAt(value: string) {
   const date = new Date(value);
@@ -36,7 +37,7 @@ export function ProjectsListPage() {
   const { session } = useAuth();
   const accessToken = session?.access_token ?? null;
 
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [projects, setProjects] = useState<Array<Project & { healthScore?: number | null }>>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -52,8 +53,34 @@ export function ProjectsListPage() {
       setLoading(true);
       try {
         const items = await listProjects(accessToken);
+        const withHealth: Array<Project & { healthScore?: number | null }> = [];
+        const chunk = 5;
+        for (let i = 0; i < items.length; i += chunk) {
+          if (cancelled) {
+            break;
+          }
+          const slice = items.slice(i, i + chunk);
+          const part = await Promise.all(
+            slice.map(async (p) => {
+              try {
+                const res = await fetch(`/api/project-intelligence/${encodeURIComponent(p.id)}`, {
+                  headers: { Authorization: `Bearer ${accessToken}` },
+                });
+                if (!res.ok) {
+                  return { ...p, healthScore: null as number | null };
+                }
+                const j = (await res.json()) as { dashboard?: { healthScore?: number } };
+                const hs = j.dashboard?.healthScore;
+                return { ...p, healthScore: typeof hs === 'number' ? hs : null };
+              } catch {
+                return { ...p, healthScore: null as number | null };
+              }
+            }),
+          );
+          withHealth.push(...part);
+        }
         if (!cancelled) {
-          setProjects(items);
+          setProjects(withHealth.length > 0 ? withHealth : items.map((p) => ({ ...p, healthScore: null })));
         }
       } catch {
         if (!cancelled) {
@@ -120,7 +147,10 @@ export function ProjectsListPage() {
                   to={`/chat?projectId=${encodeURIComponent(p.id)}`}
                   className="block rounded-xl border border-bolt-elements-borderColor bg-bolt-elements-background-depth-2 p-4 shadow-sm transition-theme hover:border-bolt-elements-item-contentAccent/40 hover:bg-bolt-elements-background-depth-3"
                 >
-                  <div className="font-semibold text-bolt-elements-textPrimary truncate">{p.title ?? 'Untitled project'}</div>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <ProjectHealthDot score={p.healthScore ?? null} />
+                    <div className="font-semibold text-bolt-elements-textPrimary truncate">{p.title ?? 'Untitled project'}</div>
+                  </div>
                   <div className="mt-1 text-xs text-bolt-elements-textSecondary">Senast ändrad: {formatUpdatedAt(p.updatedAt)}</div>
                   {p.previewUrl ? (
                     <div className="mt-2 text-xs text-bolt-elements-textTertiary truncate" title={p.previewUrl}>

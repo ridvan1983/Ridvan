@@ -25,7 +25,7 @@ import { fileModificationsToHTML } from '~/utils/diff';
 import { cubicEasingFn } from '~/utils/easings';
 import { createScopedLogger, renderLogger } from '~/utils/logger';
 import { CREDIT_REFRESH_EVENT } from '~/components/credits/CreditDisplay';
-import { runMentorBuilderSeed } from '~/lib/mentor/api.client';
+import { runMentorBuilderSeed, type MentorAskAttachmentPayload } from '~/lib/mentor/api.client';
 import { readMentorSessionIdForProject } from '~/lib/mentor/mentor-session-storage';
 import OutOfCreditsModal from '~/components/credits/OutOfCreditsModal';
 import { BaseChat } from './BaseChat';
@@ -91,6 +91,7 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
   const workbenchFiles = useStore(workbenchStore.files);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const fixAttemptCount = useRef(0);
   const buildPollIntervalRef = useRef<number | null>(null);
   const buildPollStartTimeoutRef = useRef<number | null>(null);
@@ -165,6 +166,7 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
   const [chatStarted, setChatStarted] = useState(initialMessages.length > 0);
   const [showOutOfCredits, setShowOutOfCredits] = useState(false);
   const [overloadMessage, setOverloadMessage] = useState<string | null>(null);
+  const [pendingAttachments, setPendingAttachments] = useState<MentorAskAttachmentPayload[]>([]);
 
   const { showChat } = useStore(chatStore);
 
@@ -734,10 +736,104 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
     setChatStarted(true);
   };
 
+  const onPickFile = () => {
+    fileInputRef.current?.click();
+  };
+
+  const onRemovePendingAttachment = (filename: string) => {
+    setPendingAttachments((prev) => prev.filter((attachment) => attachment.filename !== filename));
+  };
+
+  const onFileSelected = async (file: File | null) => {
+    if (!file || !session?.access_token) {
+      return;
+    }
+
+    try {
+      const titleHint = input.trim() || file.name || 'Uploaded file';
+      const ensuredProjectId = await ensureProjectId(titleHint);
+      if (!ensuredProjectId) {
+        toast.error('Could not save project to cloud. Please try again.');
+        return;
+      }
+
+      projectIdRef.current = ensuredProjectId;
+
+      const arrayBuffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      let bin = '';
+      const chunkSize = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        bin += String.fromCharCode(...bytes.slice(i, i + chunkSize));
+      }
+      const dataBase64 = btoa(bin);
+
+      const res = await fetch('/api/mentor/attachments', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          projectId: ensuredProjectId,
+          filename: file.name,
+          mimeType: file.type || 'application/octet-stream',
+          dataBase64,
+        }),
+      });
+
+      const json = (await res.json().catch(() => null)) as any;
+      if (!res.ok) {
+        throw new Error(typeof json?.error === 'string' ? json.error : '[RIDVAN-E982] Upload failed');
+      }
+
+      setPendingAttachments((prev) => [
+        ...prev,
+        {
+          filename: String(json?.attachment?.filename ?? file.name),
+          mimeType: String(json?.attachment?.mimeType ?? file.type ?? 'application/octet-stream'),
+          url: typeof json?.attachment?.url === 'string' ? json.attachment.url : undefined,
+          extractedText: typeof json?.attachment?.extractedText === 'string' ? json.attachment.extractedText : null,
+          byteSize: typeof json?.attachment?.byteSize === 'number' ? json.attachment.byteSize : undefined,
+          storage:
+            json?.attachment?.storage && typeof json.attachment.storage === 'object'
+              ? {
+                  bucket: typeof json.attachment.storage.bucket === 'string' ? json.attachment.storage.bucket : undefined,
+                  path: typeof json.attachment.storage.path === 'string' ? json.attachment.storage.path : undefined,
+                }
+              : undefined,
+        },
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Upload failed';
+      toast.error(message);
+    }
+  };
+
+  const buildAttachmentContext = (attachments: MentorAskAttachmentPayload[]) => {
+    if (attachments.length === 0) {
+      return '';
+    }
+    const hasImage = attachments.some((attachment) => String(attachment.mimeType || '').startsWith('image/'));
+    const lines = attachments.map((attachment, index) => {
+      const text = (attachment.extractedText ?? '').trim();
+      const preview = text.length > 1200 ? `${text.slice(0, 1200)}...` : text;
+      const url = typeof attachment.url === 'string' ? attachment.url.trim() : '';
+      const mime = String(attachment.mimeType || 'application/octet-stream');
+      return `Attachment ${index + 1}: ${attachment.filename}\nMIME: ${mime}\nURL: ${url || '(no url)'}\n${preview || '(No extractable text)'}`;
+    });
+    const usageRule = hasImage
+      ? `\nUse attached image URL(s) directly as the project logo/brand asset in the generated code. Do NOT create a replacement SVG/logo when a logo image attachment exists.`
+      : '';
+    return `\n\n[Attached context]\n${lines.join('\n\n')}${usageRule}`;
+  };
+
   const sendMessage = async (_event: React.UIEvent, messageInput?: string) => {
     const _input = messageInput || input;
+    const trimmedInput = _input.trim();
+    const attachmentsForRequest = [...pendingAttachments];
 
-    if (_input.length === 0 || isLoading) {
+    if ((trimmedInput.length === 0 && attachmentsForRequest.length === 0) || isLoading) {
       return;
     }
 
@@ -750,7 +846,7 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
      */
     await workbenchStore.saveAllFiles();
 
-    const ensured = await ensureProjectId(_input);
+    const ensured = await ensureProjectId(trimmedInput || attachmentsForRequest[0]?.filename || 'Uploaded file');
     if (!ensured) {
       toast.error('Could not save project to cloud. Please try again.');
       return;
@@ -780,8 +876,14 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
     }
 
     const fileModifications = workbenchStore.getFileModifcations();
+    const fallbackPrompt =
+      attachmentsForRequest.length > 0
+        ? 'Use the attached asset(s) in the implementation. If a logo/image is attached, use that exact image URL in the UI and do not generate a substitute logo.'
+        : 'Analyze the attached file and implement what is needed.';
+    const messageWithAttachments = `${trimmedInput || fallbackPrompt}${buildAttachmentContext(attachmentsForRequest)}`;
     setShowOutOfCredits(false);
     setOverloadMessage(null);
+    setPendingAttachments([]);
 
     fixAttemptCount.current = 0;
     clearBuildErrorPolling();
@@ -797,10 +899,9 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
        * If we have file modifications we append a new user message manually since we have to prefix
        * the user input with the file modifications and we don't want the new user input to appear
        * in the prompt. Using `append` is almost the same as `handleSubmit` except that we have to
-       * manually reset the input and we'd have to manually pass in file attachments. However, those
-       * aren't relevant here.
+       * manually reset the input and we'd have to manually pass in file attachments.
        */
-      await append({ role: 'user', content: `${diff}\n\n${_input}` });
+      await append({ role: 'user', content: `${diff}\n\n${messageWithAttachments}` });
 
       /**
        * After sending a new message we reset all modifications since the model
@@ -808,7 +909,7 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
        */
       workbenchStore.resetAllFileModifications();
     } else {
-      await append({ role: 'user', content: _input });
+      await append({ role: 'user', content: messageWithAttachments });
     }
 
     setInput('');
@@ -822,6 +923,16 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
 
   return (
     <>
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0] ?? null;
+          void onFileSelected(file);
+          event.target.value = '';
+        }}
+      />
       <BaseChat
         ref={animationScope}
         textareaRef={textareaRef}
@@ -869,6 +980,10 @@ export const ChatImpl = memo(({ initialMessages, storeMessageHistory }: ChatProp
             scrollTextArea();
           }, session?.access_token);
         }}
+        onPickFile={onPickFile}
+        pendingAttachments={pendingAttachments.map((attachment) => ({ filename: attachment.filename }))}
+        onRemovePendingAttachment={onRemovePendingAttachment}
+        hasPendingAttachments={pendingAttachments.length > 0}
         generationProgress={<GenerationProgress isStreaming={isLoading} />}
       />
       <OutOfCreditsModal isOpen={showOutOfCredits} onClose={() => setShowOutOfCredits(false)} />

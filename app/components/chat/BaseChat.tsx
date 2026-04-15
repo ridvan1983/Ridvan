@@ -28,6 +28,10 @@ interface BaseChatProps {
   handleInputChange?: (event: React.ChangeEvent<HTMLTextAreaElement>) => void;
   enhancePrompt?: () => void;
   generationProgress?: React.ReactNode;
+  onPickFile?: () => void;
+  pendingAttachments?: Array<{ filename: string }>;
+  onRemovePendingAttachment?: (filename: string) => void;
+  hasPendingAttachments?: boolean;
 }
 
 const TEXTAREA_MIN_HEIGHT = 76;
@@ -50,6 +54,10 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
       enhancePrompt,
       handleStop,
       generationProgress,
+      onPickFile,
+      pendingAttachments,
+      onRemovePendingAttachment,
+      hasPendingAttachments = false,
     },
     ref,
   ) => {
@@ -135,6 +143,26 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                     'shadow-sm border border-bolt-elements-borderColor bg-bolt-elements-prompt-background backdrop-filter backdrop-blur-[8px] rounded-lg overflow-hidden',
                   )}
                 >
+                  {pendingAttachments && pendingAttachments.length > 0 ? (
+                    <div className="px-3 pt-3 pb-1 flex flex-wrap gap-2">
+                      {pendingAttachments.map((attachment) => (
+                        <div
+                          key={attachment.filename}
+                          className="inline-flex items-center gap-2 rounded-full border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 px-3 py-1 text-xs text-bolt-elements-textPrimary"
+                        >
+                          <span>📎 {attachment.filename}</span>
+                          <button
+                            type="button"
+                            onClick={() => onRemovePendingAttachment?.(attachment.filename)}
+                            className="text-bolt-elements-textSecondary hover:text-bolt-elements-textPrimary"
+                            aria-label={`Remove ${attachment.filename}`}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                   <textarea
                     ref={textareaRef}
                     className={`w-full pl-4 pt-4 pr-16 focus:outline-none resize-none text-md text-bolt-elements-textPrimary placeholder-bolt-elements-textTertiary bg-transparent`}
@@ -163,7 +191,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                   <ClientOnly>
                     {() => (
                       <SendButton
-                        show={input.length > 0 || isStreaming}
+                        show={input.length > 0 || isStreaming || hasPendingAttachments}
                         isStreaming={isStreaming}
                         onClick={(event) => {
                           if (isStreaming) {
@@ -177,7 +205,17 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                     )}
                   </ClientOnly>
                   <div className="flex justify-between text-sm p-4 pt-2">
-                    <div>
+                    <div className="flex items-center gap-2">
+                      <IconButton
+                        title="Attach file"
+                        className="border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 text-bolt-elements-textSecondary enabled:hover:text-bolt-elements-textPrimary enabled:hover:bg-bolt-elements-item-backgroundActive rounded-lg px-2 py-1"
+                        onClick={() => onPickFile?.()}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-base leading-none">+</span>
+                          <span>Attach</span>
+                        </div>
+                      </IconButton>
                       <IconButton
                         title="Enhance prompt"
                         disabled={enhancingPrompt || input.trim().length === 0}
