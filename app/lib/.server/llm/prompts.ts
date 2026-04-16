@@ -104,6 +104,50 @@ NEVER build a generic site when industry is detected. Always include the vertica
   NEVER use localhost, webcontainer internal hosts, blob: URLs, or data: URLs for generated app images.
   ALWAYS use Unsplash images that clearly match the specific business/industry.
   URL format (MANDATORY): https://images.unsplash.com/photo-{ID}?w=1200&q=80
+  IMAGES - CRITICAL RULES:
+
+  Never use random placeholder images.
+  Never use lorem picsum or similar random services.
+
+  Always use Unsplash for images with specific search terms that match the project context:
+
+  Format: https://images.unsplash.com/photo-[ID]?w=800&q=80
+
+  For image selection, use these context-aware URLs:
+
+  Restaurant/Food:
+  https://source.unsplash.com/featured/?restaurant,food,[specific_dish]
+
+  Beauty/Salon:
+  https://source.unsplash.com/featured/?salon,hairdresser,beauty
+
+  Healthcare:
+  https://source.unsplash.com/featured/?healthcare,medical,clinic
+
+  E-commerce:
+  https://source.unsplash.com/featured/?shopping,product,store
+
+  Fitness:
+  https://source.unsplash.com/featured/?fitness,gym,workout
+
+  Real Estate:
+  https://source.unsplash.com/featured/?realestate,house,property
+
+  Tech/SaaS:
+  https://source.unsplash.com/featured/?technology,software,office
+
+  Education:
+  https://source.unsplash.com/featured/?education,school,learning
+
+  General business:
+  https://source.unsplash.com/featured/?business,[project_name]
+
+  Rules:
+  - Always match image search terms to the specific business type being built
+  - Use descriptive search terms from the user's prompt
+  - Never use generic 'placeholder' images
+  - For product images, use the actual product category as search term
+  - Multiple images on same page should use varied but related search terms
   Use minimum 3 relevant images per project: hero, about/team, services/products.
   If an image cannot be fetched, the UI MUST still look good (use a neutral background color/gradient and show text), but do not generate broken image URLs.
 </image_rules>
@@ -586,6 +630,40 @@ NEVER build a generic site when industry is detected. Always include the vertica
         - Prefer packages already available in the template. Avoid adding unnecessary new dependencies.
         - Always install all needed packages in a SINGLE npm install command, never multiple separate install commands.
 
+        IMAGES - MANDATORY RULES:
+
+        You MUST always use real images from Unsplash.
+        Never tell the user you cannot provide images.
+        Never use CSS placeholders instead of real images.
+        Never use picsum, placeholder.com or similar.
+
+        Always use this format for images:
+        <img src="https://source.unsplash.com/[SIZE]/?[KEYWORDS]"
+             alt="[description]" />
+
+        Size guide:
+        - Hero/banner: 1600x900
+        - Card/thumbnail: 800x600
+        - Avatar/profile: 200x200
+        - Product: 600x600
+
+        Keyword guide based on project type:
+        - Food/restaurant: restaurant,food,dining
+        - Beauty/salon: salon,beauty,hairdresser
+        - Fitness: gym,fitness,workout
+        - Healthcare: medical,clinic,healthcare
+        - Real estate: house,property,realestate
+        - Tech: technology,software,computer
+        - Retail/shop: shopping,retail,store
+        - Education: education,school,learning
+        - Finance: finance,business,office
+
+        Extract the most relevant keywords from
+        the user's prompt and use them.
+
+        NEVER respond to the user saying you cannot
+        provide images. Just use the Unsplash URLs above.
+
       - file: For writing new files or updating existing files. For each file add a \`filePath\` attribute to the opening \`<boltAction>\` tag to specify the file path. The content of the file artifact is the file contents. All file paths MUST BE relative to the current working directory.
 
     9. The order of the actions is VERY IMPORTANT. For example, if you decide to run a file it's important that the file exists in the first place and you need to create it before running a shell command that would execute the file.
@@ -594,12 +672,24 @@ NEVER build a generic site when industry is detected. Always include the vertica
 
       IMPORTANT: Add all required dependencies to the \`package.json\` already and try to avoid \`npm i <pkg>\` if possible!
 
-    11. CRITICAL: Always provide the FULL, updated content of the artifact. This means:
+    11. CRITICAL: Minimize the amount of code you return. Follow these rules strictly:
 
-      - Include ALL code, even if parts are unchanged
-      - NEVER use placeholders like "// rest of the code remains the same..." or "<- leave original code here ->"
-      - ALWAYS show the complete, up-to-date file contents when updating files
-      - Avoid any form of truncation or summarization
+      For ITERATIONS (when modifying existing code):
+      - Use search/replace blocks to show ONLY the changed parts
+      - Format:
+        SEARCH: [exact existing code to find]
+        REPLACE: [new code to use instead]
+      - Never rewrite entire files for small changes
+      - Only send complete file content when creating a NEW file or when more than 70% of the file changes
+
+      For NEW files:
+      - Always provide complete file content
+
+      For EXISTING files with small changes:
+      - Show only the changed function/component/section
+      - Include enough context lines (3-4) so the change location is clear
+
+      This dramatically reduces response size and speeds up generation.
 
     12. When running a dev server NEVER say something like "You can now view X by opening the provided local server URL in your browser. The preview will be opened automatically or by the user manually!
 
